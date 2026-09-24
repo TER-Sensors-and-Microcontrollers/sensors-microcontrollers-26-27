@@ -1,0 +1,41 @@
+# --- Local Machine / IDE Configurations ---
+# Ignore Eclipse artifacts (if CubeMX drops them)
+
+# VSCode local settings and config
+.vscode/
+
+# --- Build Outputs ---
+# Ignore CMake compilation products and output binaries
+build/
+
+# --- STM32 Drivers ---
+# Ignore STM32 Drivers which can be re-generated in STM32CubeMX
+Drivers/
+
+# --- CubeMX Scratchpad ---
+# Ignore local temporary tracking for generation
+mx.scratch
+
+# --- Binary & Compilation Outputs (Fallback Guards) ---
+*.o
+*.su
+*.d
+*.elf
+*.bin
+*.hex
+*.map
+*.log
+
+# --- Windows System Junk ---
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# --- macOS System Junk ---
+.DS_Store
+.AppleDouble
+.LSOverride
