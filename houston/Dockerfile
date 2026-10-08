@@ -52,7 +52,7 @@ ENV PATH="/opt/venv/bin:$PATH"
 USER $USERNAME
 
 # Expose port 5000 (default Flask port)
-EXPOSE 5000
+EXPOSE 5001
 
 # Default command
 CMD ["/bin/bash"]
