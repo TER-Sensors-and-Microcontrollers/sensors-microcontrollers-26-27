@@ -4,6 +4,12 @@
 # VSCode local settings and config
 .vscode/
 
+# Python extras
+__pycache__
+
+# SQLite DB (don't want to commit the whole database)
+database.db
+
 # --- Build Outputs ---
 # Ignore CMake compilation products and output binaries
 build/

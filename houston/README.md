@@ -25,11 +25,6 @@
   to install
 - *Dockerfile*: Docker compilation file for houston
 
-> NOTE: the app will attempt to run on port 5000 by default (mapped from
-> 5000:5000) on docker as well. If your device is actively using port 5000, you
-> will need to remap the port on your computer to the port on Docker (the first
-> number in xxxx:xxxx)
-
 
 **The Database**
  Each row in the database represents an *individual* sensor reading.
