@@ -51,7 +51,7 @@ ENV PATH="/opt/venv/bin:$PATH"
 # Switch to the non-root user
 USER $USERNAME
 
-# Expose port 5000 (default Flask port)
+# Expose port 5001 for Flask
 EXPOSE 5001
 
 # Default command
