@@ -21,7 +21,9 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "ili9341.h"
+#include "lvgl.h"
+#include "lcd_port.h"
+#include "counter_ui.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -31,10 +33,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define COUNTER_PERIOD_MS   1000U
-#define COUNTER_X           24
-#define COUNTER_Y           200
-#define COUNTER_SCALE       4U
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -48,8 +47,7 @@ COM_InitTypeDef BspCOMInit;
 SPI_HandleTypeDef hspi1;
 
 /* USER CODE BEGIN PV */
-static uint32_t counter;
-static uint32_t counter_tick;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -57,8 +55,7 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_SPI1_Init(void);
 /* USER CODE BEGIN PFP */
-static void demo_draw_counter(void);
-static void demo_start(void);
+static void gui_init(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -97,7 +94,7 @@ int main(void)
   MX_GPIO_Init();
   MX_SPI1_Init();
   /* USER CODE BEGIN 2 */
-  demo_start();
+  gui_init();
   /* USER CODE END 2 */
 
   /* Initialize USER push-button, will be used to trigger an interrupt each time it's pressed.*/
@@ -122,12 +119,15 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    if ((HAL_GetTick() - counter_tick) >= COUNTER_PERIOD_MS)
+    /* Runs LVGL's timers: screen refresh, animations and the counter. Sleep
+       until the next one is due. */
+    uint32_t idle_ms = lv_timer_handler();
+
+    if (idle_ms == LV_NO_TIMER_READY)
     {
-      counter_tick += COUNTER_PERIOD_MS;
-      counter++;
-      demo_draw_counter();
+      idle_ms = LV_DEF_REFR_PERIOD;
     }
+    HAL_Delay(idle_ms);
   }
   /* USER CODE END 3 */
 }
@@ -272,56 +272,19 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-static void demo_draw_counter(void)
+/* LVGL porting steps: init, tick source, display driver, then the UI. */
+static void gui_init(void)
 {
-  char text[11];
+  lv_init();
+  lv_tick_set_cb(HAL_GetTick);   /* SysTick already counts milliseconds */
+  lv_delay_set_cb(HAL_Delay);    /* used by the ILI9341 init sequence */
 
-  /* Fixed width, so each redraw fully overwrites the previous value. */
-  snprintf(text, sizeof(text), "%-8lu", (unsigned long)counter);
-  ili9341_draw_string(COUNTER_X, COUNTER_Y, text, ILI9341_YELLOW, ILI9341_BLACK, COUNTER_SCALE);
-}
-
-static void demo_start(void)
-{
-  static const struct
-  {
-    uint16_t color;
-    char label;
-  } swatches[] = {
-    {ILI9341_RED, 'R'}, {ILI9341_GREEN, 'G'}, {ILI9341_BLUE, 'B'}, {ILI9341_YELLOW, 'Y'},
-  };
-
-  if (ili9341_init(&hspi1) != HAL_OK)
+  if (lcd_port_init(&hspi1) == NULL)
   {
     Error_Handler();
   }
-  ili9341_set_rotation(0); /* portrait, 240 x 320 */
 
-  /* Colour check: must appear as red, green, blue in that order. */
-  ili9341_fill_screen(ILI9341_RED);
-  HAL_Delay(500);
-  ili9341_fill_screen(ILI9341_GREEN);
-  HAL_Delay(500);
-  ili9341_fill_screen(ILI9341_BLUE);
-  HAL_Delay(500);
-
-  ili9341_fill_screen(ILI9341_BLACK);
-  ili9341_draw_rect(0, 0, (int16_t)ili9341_width(), (int16_t)ili9341_height(), ILI9341_WHITE);
-  ili9341_draw_string(24, 24, "Hello, STM32G474", ILI9341_WHITE, ILI9341_BLACK, 2);
-
-  /* Labelled swatches: a wrong label/colour pairing means RGB/BGR is swapped. */
-  for (uint32_t i = 0; i < (sizeof(swatches) / sizeof(swatches[0])); i++)
-  {
-    int16_t x = (int16_t)(16 + (54 * (int32_t)i));
-
-    ili9341_fill_rect(x, 64, 44, 40, swatches[i].color);
-    ili9341_draw_char((int16_t)(x + 16), 112, swatches[i].label, ILI9341_WHITE, ILI9341_BLACK, 2);
-  }
-
-  ili9341_draw_string(COUNTER_X, 168, "Counter:", ILI9341_CYAN, ILI9341_BLACK, 2);
-  counter = 0;
-  counter_tick = HAL_GetTick();
-  demo_draw_counter();
+  counter_ui_create();
 }
 /* USER CODE END 4 */
 
