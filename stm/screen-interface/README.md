@@ -59,7 +59,26 @@ STM32_Programmer_CLI -c port=SWD -w build/Debug/screen-interface.elf -v -rst
 
 ### Demo
 
-On reset the screen fills red, green, then blue for 500 ms each, then shows a white border, "Hello, STM32G474", four swatches labelled R G B Y, and a counter that goes up once per second.
+On reset the screen shows a driver dashboard fed by made-up values from `Core/Src/dash_mock.c`:
+
+- READY and FAULT indicators along the top
+- a 270 degree speed gauge with the speed in the middle
+- state of charge as a bar and a percentage
+- motor and battery temperatures
+
+The values sweep through the colour thresholds in `Core/Src/dash_ui.c`: state of charge turns amber below 30% and red below 15%, temperatures turn amber from 60 °C and red from 80 °C, and FAULT lights at a motor temperature of 90 °C. Every 20 seconds the speed drops to "--" for 2 seconds to show the no-data state.
+
+To show real data, replace `dash_mock_start()` in `gui_init()` (`Core/Src/main.c`) with code that decodes the CAN frames and calls the `dash_ui_set_*()` setters (`Core/Inc/dash_ui.h`) from the main loop. Pass `DASH_NO_DATA` for a value that has not arrived yet. Do not call the setters from an interrupt: LVGL is not thread-safe.
+
+### LVGL size
+
+`Core/Inc/lv_conf.h` keeps only what the dashboard draws. The Debug build uses about 31% of the 512 KB flash; with LVGL's default widgets and the built-in fonts the much simpler counter demo used 71%.
+
+- **Widgets:** only arc, bar, label and LED are enabled. The default theme references every enabled widget, so a widget that is enabled is linked in even if it is never created. Enable a widget only when the UI uses it.
+- **Colour formats:** the renderer supports only RGB565, RGB565 swapped (what the display uses) and ARGB8888 (used internally for layers).
+- **`LV_DRAW_SW_COMPLEX`** stays on. It draws arcs, rounded corners, round LEDs and shadows; without it those shapes are silently not drawn.
+- **Fonts:** the built-in Montserrat fonts are off. `Core/Src/fonts/dash_font_14.c`, `dash_font_28.c` and `dash_font_72.c` hold only the characters the dashboard uses (about 23 KB together; the built-in 48 px font alone is 95 KB). `dash_font_14` is the default font. A character missing from a font draws as a box: add it to `tools/gen_fonts.sh`, run the script (needs Node.js), and commit the regenerated files.
+- **Images:** a full-screen 240x320 RGB565 image is 150 KB of flash. Prefer icons in a font, or small images.
 
 ### Troubleshooting
 
