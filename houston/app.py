@@ -15,6 +15,24 @@ import atexit
 # import serial
 #from ER-sensors-microcontrollers.pi.globals import *
 import numpy as np
+from collections import deque
+import threading
+from serial_reader import reader
+
+live = {}
+live_lock = threading.Lock()
+
+def publish(reading):
+    with live_lock:
+        live.setdefault(reading[0], deque(maxlen=1000)).append(reading)
+
+@app.route('/live/<int:sensor_id>')
+def get_live(sensor_id):
+    since = request.args.get('since', 0, type=float)
+    with live_lock:
+        rows = [r for r in live.get(sensor_id, []) if r[4] > since]
+    return jsonify([{"sensor_id": r[0], "name": r[1], "data": r[2],
+                     "unit": r[3], "timestamp": r[4]} for r in rows])
 
 # Flask constructor takes the name of 
 # current module (__name__) as argument.
@@ -371,6 +389,8 @@ if __name__ == '__main__':
         ")")
         db.commit()
         cursor.close()
+
+
     # Runs the app using socketio for real-time data updates from the
     # shared memory.
     socketio.run(app, host="0.0.0.0", port=5001, debug = True, allow_unsafe_werkzeug=True)

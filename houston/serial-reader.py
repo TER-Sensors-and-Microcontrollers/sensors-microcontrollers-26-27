@@ -5,11 +5,15 @@
 
 from globals import *
 
+
 current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.dirname(current_dir)
 
 app = Flask(__name__)
 DATABASE = parent_dir +'/database.db'
+
+
+
 
 # helper func that returns 8 bytes, randomized (CAN DATA bytestring)
 def randomize_bytes():
@@ -96,7 +100,7 @@ def reader(ser:serial.Serial, debug=True):
                         "INSERT INTO sensor_readings (sensor_id, name, data, unit, timestamp) VALUES (?, ?, ?, ?, ?)",
                             reading
                         )
-                        db.commit()
+                        db.chttps://prod.liveshare.vsengsaas.visualstudio.com/join?E851B8DEF9EF597932682403936F31B35277ommit()
                     case 162: # Temp 3
                         cool_temp = np.float32(struct.unpack('<H', data[0:2])[0])
                         htspt_temp = np.float32(struct.unpack('<H', data[2:4])[0])
