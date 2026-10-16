@@ -23,7 +23,8 @@
 /* USER CODE BEGIN Includes */
 #include "lvgl.h"
 #include "lcd_port.h"
-#include "counter_ui.h"
+#include "dash_ui.h"
+#include "dash_mock.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -119,8 +120,8 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    /* Runs LVGL's timers: screen refresh, animations and the counter. Sleep
-       until the next one is due. */
+    /* Runs LVGL's timers: screen refresh and the dashboard's mock data.
+       Sleep until the next one is due. */
     uint32_t idle_ms = lv_timer_handler();
 
     if (idle_ms == LV_NO_TIMER_READY)
@@ -284,7 +285,8 @@ static void gui_init(void)
     Error_Handler();
   }
 
-  counter_ui_create();
+  dash_ui_create();
+  dash_mock_start();
 }
 /* USER CODE END 4 */
 
