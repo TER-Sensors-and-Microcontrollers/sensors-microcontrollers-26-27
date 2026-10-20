@@ -25,6 +25,7 @@
 #include "lcd_port.h"
 #include "dash_ui.h"
 #include "dash_mock.h"
+#include "can_bus.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -34,7 +35,12 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+/* A CAN bus counts as alive if it received a frame this recently. */
+#define CAN_ACTIVE_TIMEOUT_MS   500U
 
+/* Longest the main loop sleeps, so received CAN frames are handled promptly
+   and the software queues (can_bus.c) do not fill up. */
+#define MAIN_LOOP_MAX_IDLE_MS   5U
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -52,7 +58,21 @@ SPI_HandleTypeDef hspi1;
 SPI_HandleTypeDef hspi2;
 
 /* USER CODE BEGIN PV */
+/* Main display (speed, state of charge, status) on SPI1. */
+static const lcd_port_t s_lcd_main = {
+  .hspi = &hspi1,
+  .cs_port = TFT_CS_GPIO_Port,   .cs_pin = TFT_CS_Pin,
+  .dc_port = TFT_DC_GPIO_Port,   .dc_pin = TFT_DC_Pin,
+  .rst_port = TFT_RST_GPIO_Port, .rst_pin = TFT_RST_Pin,
+};
 
+/* Second display (temperatures, CAN status) on SPI2. */
+static const lcd_port_t s_lcd_aux = {
+  .hspi = &hspi2,
+  .cs_port = TFT2_CS_GPIO_Port,   .cs_pin = TFT2_CS_Pin,
+  .dc_port = TFT2_DC_GPIO_Port,   .dc_pin = TFT2_DC_Pin,
+  .rst_port = TFT2_RST_GPIO_Port, .rst_pin = TFT2_RST_Pin,
+};
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -64,6 +84,8 @@ static void MX_FDCAN3_Init(void);
 static void MX_SPI2_Init(void);
 /* USER CODE BEGIN PFP */
 static void gui_init(void);
+static void can_poll(void);
+static void handle_can_frame(can_bus_t bus, const can_frame_t *frame);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -106,6 +128,11 @@ int main(void)
   MX_SPI2_Init();
   /* USER CODE BEGIN 2 */
   gui_init();
+
+  if (!can_bus_init(&hfdcan1, &hfdcan3))
+  {
+    Error_Handler();
+  }
   /* USER CODE END 2 */
 
   /* Initialize USER push-button, will be used to trigger an interrupt each time it's pressed.*/
@@ -130,13 +157,16 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    /* Runs LVGL's timers: screen refresh and the dashboard's mock data.
-       Sleep until the next one is due. */
+    can_poll();
+
+    /* Runs LVGL's timers: refresh of both screens and the dashboard's mock
+       data. Sleep until the next one is due, but not so long that CAN frames
+       pile up. */
     uint32_t idle_ms = lv_timer_handler();
 
-    if (idle_ms == LV_NO_TIMER_READY)
+    if ((idle_ms == LV_NO_TIMER_READY) || (idle_ms > MAIN_LOOP_MAX_IDLE_MS))
     {
-      idle_ms = LV_DEF_REFR_PERIOD;
+      idle_ms = MAIN_LOOP_MAX_IDLE_MS;
     }
     HAL_Delay(idle_ms);
   }
@@ -211,10 +241,10 @@ static void MX_FDCAN1_Init(void)
   hfdcan1.Init.AutoRetransmission = DISABLE;
   hfdcan1.Init.TransmitPause = DISABLE;
   hfdcan1.Init.ProtocolException = DISABLE;
-  hfdcan1.Init.NominalPrescaler = 16;
-  hfdcan1.Init.NominalSyncJumpWidth = 1;
-  hfdcan1.Init.NominalTimeSeg1 = 1;
-  hfdcan1.Init.NominalTimeSeg2 = 1;
+  hfdcan1.Init.NominalPrescaler = 17;
+  hfdcan1.Init.NominalSyncJumpWidth = 4;
+  hfdcan1.Init.NominalTimeSeg1 = 15;
+  hfdcan1.Init.NominalTimeSeg2 = 4;
   hfdcan1.Init.DataPrescaler = 1;
   hfdcan1.Init.DataSyncJumpWidth = 1;
   hfdcan1.Init.DataTimeSeg1 = 1;
@@ -254,10 +284,10 @@ static void MX_FDCAN3_Init(void)
   hfdcan3.Init.AutoRetransmission = DISABLE;
   hfdcan3.Init.TransmitPause = DISABLE;
   hfdcan3.Init.ProtocolException = DISABLE;
-  hfdcan3.Init.NominalPrescaler = 16;
-  hfdcan3.Init.NominalSyncJumpWidth = 1;
-  hfdcan3.Init.NominalTimeSeg1 = 1;
-  hfdcan3.Init.NominalTimeSeg2 = 1;
+  hfdcan3.Init.NominalPrescaler = 17;
+  hfdcan3.Init.NominalSyncJumpWidth = 4;
+  hfdcan3.Init.NominalTimeSeg1 = 15;
+  hfdcan3.Init.NominalTimeSeg2 = 4;
   hfdcan3.Init.DataPrescaler = 1;
   hfdcan3.Init.DataSyncJumpWidth = 1;
   hfdcan3.Init.DataTimeSeg1 = 1;
@@ -334,7 +364,7 @@ static void MX_SPI2_Init(void)
   hspi2.Instance = SPI2;
   hspi2.Init.Mode = SPI_MODE_MASTER;
   hspi2.Init.Direction = SPI_DIRECTION_2LINES;
-  hspi2.Init.DataSize = SPI_DATASIZE_4BIT;
+  hspi2.Init.DataSize = SPI_DATASIZE_8BIT;
   hspi2.Init.CLKPolarity = SPI_POLARITY_LOW;
   hspi2.Init.CLKPhase = SPI_PHASE_1EDGE;
   hspi2.Init.NSS = SPI_NSS_SOFT;
@@ -374,13 +404,20 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOB, TFT2_RST_Pin|TFT2_DC_Pin|TFT2_CS_Pin|TFT_CS_Pin, GPIO_PIN_SET);
+
+  /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(TFT_DC_GPIO_Port, TFT_DC_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(TFT_RST_GPIO_Port, TFT_RST_Pin, GPIO_PIN_SET);
 
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(TFT_CS_GPIO_Port, TFT_CS_Pin, GPIO_PIN_SET);
+  /*Configure GPIO pins : TFT2_RST_Pin TFT2_DC_Pin TFT2_CS_Pin TFT_CS_Pin */
+  GPIO_InitStruct.Pin = TFT2_RST_Pin|TFT2_DC_Pin|TFT2_CS_Pin|TFT_CS_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /*Configure GPIO pin : TFT_DC_Pin */
   GPIO_InitStruct.Pin = TFT_DC_Pin;
@@ -396,33 +433,60 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
   HAL_GPIO_Init(TFT_RST_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : TFT_CS_Pin */
-  GPIO_InitStruct.Pin = TFT_CS_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
-  HAL_GPIO_Init(TFT_CS_GPIO_Port, &GPIO_InitStruct);
-
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
   /* USER CODE END MX_GPIO_Init_2 */
 }
 
 /* USER CODE BEGIN 4 */
-/* LVGL porting steps: init, tick source, display driver, then the UI. */
+/* LVGL porting steps: init, tick source, display drivers, then the UI. */
 static void gui_init(void)
 {
+  lv_display_t *main_disp;
+  lv_display_t *aux_disp;
+
   lv_init();
   lv_tick_set_cb(HAL_GetTick);   /* SysTick already counts milliseconds */
   lv_delay_set_cb(HAL_Delay);    /* used by the ILI9341 init sequence */
 
-  if (lcd_port_init(&hspi1) == NULL)
+  main_disp = lcd_port_init(&s_lcd_main);
+  aux_disp = lcd_port_init(&s_lcd_aux);
+  if ((main_disp == NULL) || (aux_disp == NULL))
   {
     Error_Handler();
   }
 
-  dash_ui_create();
+  dash_ui_create(main_disp, aux_disp);
   dash_mock_start();
+}
+
+/* Handle every CAN frame received since the last pass and show which buses
+   are alive. Runs in the main loop, so it may call the dash_ui setters. */
+static void can_poll(void)
+{
+  can_frame_t frame;
+
+  can_bus_service();
+
+  for (can_bus_t bus = CAN_BUS_1; bus < CAN_BUS_COUNT; bus++)
+  {
+    while (can_bus_receive(bus, &frame))
+    {
+      handle_can_frame(bus, &frame);
+    }
+  }
+
+  dash_ui_set_can_status(can_bus_is_active(CAN_BUS_1, CAN_ACTIVE_TIMEOUT_MS),
+                         can_bus_is_active(CAN_BUS_2, CAN_ACTIVE_TIMEOUT_MS));
+}
+
+/* Decode the car's frames here and pass the values to the dash_ui_set_*()
+   setters, then remove dash_mock_start() from gui_init(). Until the CAN IDs
+   are defined, received frames only light the CAN indicators. */
+static void handle_can_frame(can_bus_t bus, const can_frame_t *frame)
+{
+  (void)bus;
+  (void)frame;
 }
 /* USER CODE END 4 */
 

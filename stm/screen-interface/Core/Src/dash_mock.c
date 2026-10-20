@@ -7,7 +7,10 @@
   *          main loop.
   *
   *          Every value sweeps through its colour thresholds, and the speed
-  *          drops out periodically to show the "--" no-data state.
+  *          drops out periodically to show the "--" no-data state. Speed,
+  *          state of charge and status go to the main display, temperatures
+  *          to the second one. The CAN indicators are not mocked: they show
+  *          real bus traffic (can_poll() in main.c).
   ******************************************************************************
   */
 #include "dash_mock.h"

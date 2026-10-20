@@ -64,6 +64,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/lcd_port.c
     Core/Src/dash_ui.c
     Core/Src/dash_mock.c
+    Core/Src/can_bus.c
     Core/Src/fonts/dash_font_14.c
     Core/Src/fonts/dash_font_28.c
     Core/Src/fonts/dash_font_72.c
