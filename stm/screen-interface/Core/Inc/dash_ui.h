@@ -42,6 +42,9 @@ void dash_ui_set_status(bool ready, bool fault);
 void dash_ui_set_temps(int32_t motor_c, int32_t batt_c);
 void dash_ui_set_can_status(bool can1_ok, bool can2_ok);
 
+/* Show that the configured CAN notification frame was received. */
+void dash_ui_show_can_notification(void);
+
 #ifdef __cplusplus
 }
 #endif

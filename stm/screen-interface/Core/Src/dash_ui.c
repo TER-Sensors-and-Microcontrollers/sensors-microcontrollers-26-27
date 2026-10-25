@@ -66,6 +66,7 @@
 #define PANEL_BAR_DY        90
 #define PANEL_BAR_H         10
 #define PANEL_VALUE_RIGHT   164     /* the number's right edge, from the left */
+#define CAN_NOTIFICATION_Y  252
 #define CAN_ROW_Y           288     /* CAN LEDs and captions centre on it */
 #define CAN_COLUMN_X        60      /* column centres are this far either side */
 
@@ -88,11 +89,13 @@ static lv_obj_t *s_ready_led;
 static lv_obj_t *s_ready_icon;
 static lv_obj_t *s_fault_led;
 static lv_obj_t *s_fault_icon;
+static lv_obj_t *s_main_can_notification;
 
 /* Second display */
 static temp_panel_t s_motor;
 static temp_panel_t s_batt;
 static lv_obj_t *s_can_led[2];
+static lv_obj_t *s_aux_can_notification;
 
 /* What is on screen now, so a setter can skip an unchanged value. */
 static int32_t s_speed;
@@ -285,6 +288,15 @@ static lv_obj_t *make_can_indicator(lv_obj_t *scr, const char *caption, int32_t 
   return led;
 }
 
+static lv_obj_t *make_can_notification(lv_obj_t *scr)
+{
+  lv_obj_t *notification = make_label(scr, "CAN 0x123 EVENT", &dash_font_14, COLOR_WARN);
+
+  lv_obj_align(notification, LV_ALIGN_TOP_MID, 0, CAN_NOTIFICATION_Y);
+  lv_obj_add_flag(notification, LV_OBJ_FLAG_HIDDEN);
+  return notification;
+}
+
 /* ---- Screens --------------------------------------------------------------*/
 
 static void create_main_screen(lv_display_t *disp)
@@ -330,6 +342,7 @@ static void create_main_screen(lv_display_t *disp)
   s_soc_label = make_label(scr, "--%", &dash_font_28, COLOR_MUTED);
   lv_obj_align(s_soc_label, LV_ALIGN_TOP_RIGHT, -MARGIN, SOC_Y);
 
+  s_main_can_notification = make_can_notification(scr);
   s_speed = DASH_NO_DATA;
   s_soc = DASH_NO_DATA;
   s_ready = false;
@@ -345,6 +358,7 @@ static void create_aux_screen(lv_display_t *disp)
 
   s_can_led[0] = make_can_indicator(scr, "CAN1", -CAN_COLUMN_X);
   s_can_led[1] = make_can_indicator(scr, "CAN2", CAN_COLUMN_X);
+  s_aux_can_notification = make_can_notification(scr);
   s_can_ok[0] = false;
   s_can_ok[1] = false;
 }
@@ -433,4 +447,10 @@ void dash_ui_set_can_status(bool can1_ok, bool can2_ok)
       set_led(s_can_led[i], ok[i]);
     }
   }
+}
+
+void dash_ui_show_can_notification(void)
+{
+  lv_obj_clear_flag(s_main_can_notification, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_clear_flag(s_aux_can_notification, LV_OBJ_FLAG_HIDDEN);
 }

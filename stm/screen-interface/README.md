@@ -94,6 +94,10 @@ The values sweep through the colour thresholds in `Core/Src/dash_ui.c`: state of
 
 To show real data, decode the frames in `handle_can_frame()` (`Core/Src/main.c`), call the `dash_ui_set_*()` setters (`Core/Inc/dash_ui.h`) from there, and remove `dash_mock_start()` from `gui_init()`. Pass `DASH_NO_DATA` for a value that has not arrived yet. Do not call the setters from an interrupt: LVGL is not thread-safe.
 
+The dashboard displays `CAN 0x123 EVENT` on both screens after receiving a
+standard CAN frame with ID `0x123`, length 8, and data
+`FF 00 FF 00 FF 00 FF 00`. The notification remains visible until reset.
+
 To move a metric to the other screen, move its widgets between `create_main_screen()` and `create_aux_screen()` in `Core/Src/dash_ui.c`. The setters do not need to change.
 
 ### LVGL size

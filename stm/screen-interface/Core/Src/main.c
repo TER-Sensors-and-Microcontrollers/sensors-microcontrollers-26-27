@@ -41,6 +41,8 @@
 /* Longest the main loop sleeps, so received CAN frames are handled promptly
    and the software queues (can_bus.c) do not fill up. */
 #define MAIN_LOOP_MAX_IDLE_MS   5U
+
+#define CAN_NOTIFICATION_ID     0x123U
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -481,12 +483,24 @@ static void can_poll(void)
 }
 
 /* Decode the car's frames here and pass the values to the dash_ui_set_*()
-   setters, then remove dash_mock_start() from gui_init(). Until the CAN IDs
-   are defined, received frames only light the CAN indicators. */
+   setters, then remove dash_mock_start() from gui_init(). */
 static void handle_can_frame(can_bus_t bus, const can_frame_t *frame)
 {
   (void)bus;
-  (void)frame;
+
+  if (!frame->extended && (frame->id == CAN_NOTIFICATION_ID) &&
+      (frame->len == 8U) &&
+      (frame->data[0] == 0xFFU) &&
+      (frame->data[1] == 0x00U) &&
+      (frame->data[2] == 0xFFU) &&
+      (frame->data[3] == 0x00U) &&
+      (frame->data[4] == 0xFFU) &&
+      (frame->data[5] == 0x00U) &&
+      (frame->data[6] == 0xFFU) &&
+      (frame->data[7] == 0x00U))
+  {
+    dash_ui_show_can_notification();
+  }
 }
 /* USER CODE END 4 */
 
