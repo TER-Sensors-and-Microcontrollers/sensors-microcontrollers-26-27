@@ -5,9 +5,9 @@
 */
 
 // initial starting values for the 3 graphs, subject to change
-var selectedValue1 = 1;
-var selectedValue2 = 2;
-var selectedValue3 = 3;
+var selectedValue1 = 1610;
+var selectedValue2 = 1651;
+var selectedValue3 = 1670;
 
 var currentX = "motor temp"
 var currentY = "battery"
