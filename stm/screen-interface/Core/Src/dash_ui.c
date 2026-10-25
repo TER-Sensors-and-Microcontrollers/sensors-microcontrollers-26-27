@@ -3,8 +3,8 @@
   * @file    dash_ui.c
   * @brief   Driver dashboard over two displays.
   *
-  *          Main display: ready / fault indicators, speed gauge and state of
-  *          charge.
+  *          Main display: ready / fault indicators, speed gauge, state of
+  *          charge and the IMU readout.
   *          Second display: motor and battery temperatures, and whether each
   *          CAN bus is receiving.
   *
@@ -33,6 +33,8 @@
 /* Thermometer (U+F2C9). LVGL has no LV_SYMBOL_ for it. */
 #define SYMBOL_THERMO       "\xEF\x8B\x89"
 #define DEGREE              "\xC2\xB0"
+#define SQUARED             "\xC2\xB2"
+#define MICRO               "\xC2\xB5"
 
 /* ---- Look -----------------------------------------------------------------*/
 #define COLOR_BG            lv_color_hex(0x10132B)
@@ -49,14 +51,27 @@
 #define MARGIN              14
 #define LED_SIZE            12
 
-/* Main display */
+/* Main display, top to bottom: status row, gauge, state of charge, IMU
+   table, then a footer with the RX count and the CAN notification. */
 #define STATUS_Y            16      /* status icons and captions centre on it */
-#define GAUGE_Y             46
-#define GAUGE_SIZE          204
-#define GAUGE_WIDTH         12
-#define SOC_Y               274
+#define GAUGE_Y             36
+#define GAUGE_SIZE          136
+#define GAUGE_WIDTH         10
+#define GAUGE_SPEED_DY      (-8)    /* offsets from the gauge centre */
+#define GAUGE_UNIT_DY       26
+#define SOC_Y               174
 #define SOC_BAR_W           78
 #define SOC_BAR_H           12
+
+/* IMU table: a header row, accel / gyro / mag rows, a second header row,
+   then the Euler angles. Values are right-aligned on the column edges. */
+#define IMU_Y               208
+#define IMU_ROW_H           16
+#define IMU_COL_RIGHT_0     102     /* right edge of the first value column */
+#define IMU_COL_W           43      /* fits "-2000", the widest value */
+#define IMU_UNIT_X          (IMU_COL_RIGHT_0 + (2 * IMU_COL_W) + 6)
+#define IMU_HEADING_INSET   16      /* heading centre, left of the column edge */
+#define MAIN_FOOTER_Y       304
 
 /* Second display: two temperature panels, then the CAN row. Inside a panel
    the offsets are from the panel's top edge. */
@@ -66,9 +81,10 @@
 #define PANEL_BAR_DY        90
 #define PANEL_BAR_H         10
 #define PANEL_VALUE_RIGHT   164     /* the number's right edge, from the left */
-#define CAN_NOTIFICATION_Y  252
+#define AUX_NOTIFICATION_Y  252
 #define CAN_ROW_Y           288     /* CAN LEDs and captions centre on it */
 #define CAN_COLUMN_X        60      /* column centres are this far either side */
+#define CAN_RX_Y            300     /* RX count, under the CAN row */
 
 /* One temperature panel on the second display. */
 typedef struct
@@ -90,12 +106,16 @@ static lv_obj_t *s_ready_icon;
 static lv_obj_t *s_fault_led;
 static lv_obj_t *s_fault_icon;
 static lv_obj_t *s_main_can_notification;
+static lv_obj_t *s_main_rx_label;
+static lv_obj_t *s_imu_value[DASH_IMU_COUNT][3];
+static lv_obj_t *s_imu_calib;
 
 /* Second display */
 static temp_panel_t s_motor;
 static temp_panel_t s_batt;
 static lv_obj_t *s_can_led[2];
 static lv_obj_t *s_aux_can_notification;
+static lv_obj_t *s_aux_rx_label;
 
 /* What is on screen now, so a setter can skip an unchanged value. */
 static int32_t s_speed;
@@ -103,6 +123,9 @@ static int32_t s_soc;
 static bool s_ready;
 static bool s_fault;
 static bool s_can_ok[2];
+static uint32_t s_can_rx_count;
+static int32_t s_imu_shown[DASH_IMU_COUNT][3];
+static int32_t s_imu_calib_shown;
 
 /* ---- Helpers --------------------------------------------------------------*/
 
@@ -288,13 +311,89 @@ static lv_obj_t *make_can_indicator(lv_obj_t *scr, const char *caption, int32_t 
   return led;
 }
 
-static lv_obj_t *make_can_notification(lv_obj_t *scr)
+static lv_obj_t *make_can_notification(lv_obj_t *scr, lv_align_t align, int32_t x, int32_t y)
 {
   lv_obj_t *notification = make_label(scr, "CAN 0x123 EVENT", &dash_font_14, COLOR_WARN);
 
-  lv_obj_align(notification, LV_ALIGN_TOP_MID, 0, CAN_NOTIFICATION_Y);
+  lv_obj_align(notification, align, x, y);
   lv_obj_add_flag(notification, LV_OBJ_FLAG_HIDDEN);
   return notification;
+}
+
+/* Label whose right edge stays at x (from the left) as its text changes. */
+static lv_obj_t *make_right_label(lv_obj_t *scr, const char *text, int32_t x, int32_t y, lv_color_t color)
+{
+  lv_obj_t *label = make_label(scr, text, &dash_font_14, color);
+
+  lv_obj_align(label, LV_ALIGN_TOP_RIGHT, x - SCREEN_W, y);
+  return label;
+}
+
+static int32_t imu_col_right(uint32_t col)
+{
+  return IMU_COL_RIGHT_0 + ((int32_t)col * IMU_COL_W);
+}
+
+/* One table row: caption, three values and a unit. */
+static void make_imu_row(lv_obj_t *scr, dash_imu_t row, const char *caption, const char *unit, int32_t y)
+{
+  lv_obj_t *text = make_label(scr, caption, &dash_font_14, COLOR_MUTED);
+
+  lv_obj_align(text, LV_ALIGN_TOP_LEFT, MARGIN, y);
+  for (uint32_t col = 0U; col < 3U; col++)
+  {
+    s_imu_value[row][col] = make_right_label(scr, "--", imu_col_right(col), y, COLOR_MUTED);
+    s_imu_shown[row][col] = DASH_NO_DATA;
+  }
+  text = make_label(scr, unit, &dash_font_14, COLOR_MUTED);
+  lv_obj_align(text, LV_ALIGN_TOP_LEFT, IMU_UNIT_X, y);
+}
+
+/* Column headings, centred over a typical value ("-39.2") so that "ROLL"
+   and "PITCH" do not run together. */
+static void make_imu_heading(lv_obj_t *scr, const char *const names[3], int32_t y)
+{
+  for (uint32_t col = 0U; col < 3U; col++)
+  {
+    lv_obj_t *label = make_label(scr, names[col], &dash_font_14, COLOR_MUTED);
+
+    lv_obj_align(label, LV_ALIGN_TOP_MID, imu_col_right(col) - IMU_HEADING_INSET - (SCREEN_W / 2), y);
+  }
+}
+
+static void make_imu_table(lv_obj_t *scr)
+{
+  static const char *const xyz[3] = {"X", "Y", "Z"};
+  static const char *const hrp[3] = {"HDG", "ROLL", "PITCH"};
+  lv_obj_t *title = make_label(scr, "IMU", &dash_font_14, COLOR_ACCENT);
+
+  lv_obj_align(title, LV_ALIGN_TOP_LEFT, MARGIN, IMU_Y);
+  make_imu_heading(scr, xyz, IMU_Y);
+  s_imu_calib = make_label(scr, "CAL -", &dash_font_14, COLOR_MUTED);
+  lv_obj_align(s_imu_calib, LV_ALIGN_TOP_LEFT, IMU_UNIT_X, IMU_Y);
+  s_imu_calib_shown = DASH_NO_DATA;
+
+  make_imu_row(scr, DASH_IMU_ACCEL, "ACC", "m/s" SQUARED, IMU_Y + (1 * IMU_ROW_H));
+  make_imu_row(scr, DASH_IMU_GYRO, "GYRO", DEGREE "/s", IMU_Y + (2 * IMU_ROW_H));
+  make_imu_row(scr, DASH_IMU_MAG, "MAG", MICRO "T", IMU_Y + (3 * IMU_ROW_H));
+  make_imu_heading(scr, hrp, IMU_Y + (4 * IMU_ROW_H));
+  make_imu_row(scr, DASH_IMU_EULER, "ANGLE", DEGREE, IMU_Y + (5 * IMU_ROW_H));
+}
+
+/* Tenths as text: "-9.8" below 100, "-123" (rounded) from 100 up. */
+static void format_tenths(char *buf, uint32_t size, int32_t x10)
+{
+  const char *sign = (x10 < 0) ? "-" : "";
+  const int32_t mag = (x10 < 0) ? -x10 : x10;
+
+  if (mag < 1000)
+  {
+    lv_snprintf(buf, size, "%s%" LV_PRId32 ".%" LV_PRId32, sign, mag / 10, mag % 10);
+  }
+  else
+  {
+    lv_snprintf(buf, size, "%s%" LV_PRId32, sign, (mag + 5) / 10);
+  }
 }
 
 /* ---- Screens --------------------------------------------------------------*/
@@ -327,10 +426,10 @@ static void create_main_screen(lv_display_t *disp)
   lv_obj_set_style_arc_rounded(s_gauge, true, LV_PART_INDICATOR);
 
   s_speed_label = make_label(s_gauge, "--", &dash_font_72, COLOR_MUTED);
-  lv_obj_align(s_speed_label, LV_ALIGN_CENTER, 0, -8);
+  lv_obj_align(s_speed_label, LV_ALIGN_CENTER, 0, GAUGE_SPEED_DY);
 
   unit = make_label(s_gauge, SPEED_UNIT, &dash_font_14, COLOR_MUTED);
-  lv_obj_align(unit, LV_ALIGN_CENTER, 0, 30);
+  lv_obj_align(unit, LV_ALIGN_CENTER, 0, GAUGE_UNIT_DY);
 
   /* State of charge: battery icon, bar, percentage. */
   battery = make_label(scr, LV_SYMBOL_BATTERY_FULL, &dash_font_28, COLOR_MUTED);
@@ -342,7 +441,12 @@ static void create_main_screen(lv_display_t *disp)
   s_soc_label = make_label(scr, "--%", &dash_font_28, COLOR_MUTED);
   lv_obj_align(s_soc_label, LV_ALIGN_TOP_RIGHT, -MARGIN, SOC_Y);
 
-  s_main_can_notification = make_can_notification(scr);
+  make_imu_table(scr);
+
+  /* Footer: RX count on the left, notification on the right. */
+  s_main_rx_label = make_label(scr, "RX 0", &dash_font_14, COLOR_MUTED);
+  lv_obj_align(s_main_rx_label, LV_ALIGN_TOP_LEFT, MARGIN, MAIN_FOOTER_Y);
+  s_main_can_notification = make_can_notification(scr, LV_ALIGN_TOP_RIGHT, -MARGIN, MAIN_FOOTER_Y);
   s_speed = DASH_NO_DATA;
   s_soc = DASH_NO_DATA;
   s_ready = false;
@@ -358,9 +462,14 @@ static void create_aux_screen(lv_display_t *disp)
 
   s_can_led[0] = make_can_indicator(scr, "CAN1", -CAN_COLUMN_X);
   s_can_led[1] = make_can_indicator(scr, "CAN2", CAN_COLUMN_X);
-  s_aux_can_notification = make_can_notification(scr);
+  s_aux_can_notification = make_can_notification(scr, LV_ALIGN_TOP_MID, 0, AUX_NOTIFICATION_Y);
+
+  s_aux_rx_label = make_label(scr, "RX 0", &dash_font_14, COLOR_MUTED);
+  lv_obj_align(s_aux_rx_label, LV_ALIGN_TOP_MID, 0, CAN_RX_Y);
+
   s_can_ok[0] = false;
   s_can_ok[1] = false;
+  s_can_rx_count = 0U;
 }
 
 /* ---- Public API -----------------------------------------------------------*/
@@ -447,6 +556,86 @@ void dash_ui_set_can_status(bool can1_ok, bool can2_ok)
       set_led(s_can_led[i], ok[i]);
     }
   }
+}
+
+void dash_ui_set_imu(dash_imu_t row, int32_t a_x10, int32_t b_x10, int32_t c_x10)
+{
+  const int32_t v[3] = {a_x10, b_x10, c_x10};
+  char buf[12];
+
+  if (row >= DASH_IMU_COUNT)
+  {
+    return;
+  }
+  for (uint32_t col = 0U; col < 3U; col++)
+  {
+    lv_obj_t *label = s_imu_value[row][col];
+
+    if (v[col] == s_imu_shown[row][col])
+    {
+      continue;
+    }
+    if (v[col] == DASH_NO_DATA)
+    {
+      lv_label_set_text(label, "--");
+      lv_obj_set_style_text_color(label, COLOR_MUTED, 0);
+    }
+    else
+    {
+      format_tenths(buf, sizeof(buf), v[col]);
+      lv_label_set_text(label, buf);
+      if (s_imu_shown[row][col] == DASH_NO_DATA)
+      {
+        lv_obj_set_style_text_color(label, COLOR_TEXT, 0);
+      }
+    }
+    s_imu_shown[row][col] = v[col];
+  }
+}
+
+void dash_ui_set_imu_calib(int32_t level)
+{
+  lv_color_t color;
+
+  if (level == s_imu_calib_shown)
+  {
+    return;
+  }
+  s_imu_calib_shown = level;
+
+  if (level == DASH_NO_DATA)
+  {
+    lv_label_set_text(s_imu_calib, "CAL -");
+    lv_obj_set_style_text_color(s_imu_calib, COLOR_MUTED, 0);
+    return;
+  }
+  if (level >= 3)
+  {
+    color = COLOR_OK;
+  }
+  else if (level >= 1)
+  {
+    color = COLOR_WARN;
+  }
+  else
+  {
+    color = COLOR_ALERT;
+  }
+  lv_label_set_text_fmt(s_imu_calib, "CAL %" LV_PRId32, level);
+  lv_obj_set_style_text_color(s_imu_calib, color, 0);
+}
+
+void dash_ui_set_can_rx_count(uint32_t count)
+{
+  if (count == s_can_rx_count)
+  {
+    return;
+  }
+  s_can_rx_count = count;
+
+  /* Centre-aligned labels re-centre themselves as the text grows. */
+  lv_label_set_text_fmt(s_main_rx_label, "RX %" LV_PRIu32, count);
+  lv_label_set_text_fmt(s_aux_rx_label, "RX %" LV_PRIu32, count);
 }
 
 void dash_ui_show_can_notification(void)

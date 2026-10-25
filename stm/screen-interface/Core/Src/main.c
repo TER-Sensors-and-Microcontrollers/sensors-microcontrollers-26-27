@@ -43,6 +43,25 @@
 #define MAIN_LOOP_MAX_IDLE_MS   5U
 
 #define CAN_NOTIFICATION_ID     0x123U
+
+/* BNO055 IMU frames, as sent by stm/can-frame-test. Standard IDs; each
+   payload is three little-endian int16 raw BNO055 counts:
+     0x100 accel x, y, z           100 LSB per m/s^2   (6 bytes)
+     0x101 gyro  x, y, z            16 LSB per deg/s   (6 bytes)
+     0x102 mag   x, y, z            16 LSB per uT      (6 bytes)
+     0x103 heading, roll, pitch     16 LSB per degree, byte 6 = CALIB_STAT
+           (sys | gyro | accel | mag, 2 bits each)     (7 bytes)
+   The IDs are consecutive and in dash_imu_t order. */
+#define CAN_ID_IMU_FIRST        0x100U
+#define IMU_CALIB_FRAME_LEN     7U
+#define IMU_FRAME_LEN           6U
+
+/* An IMU row shows "--" if its frame is older than this. */
+#define IMU_TIMEOUT_MS          500U
+
+/* The IMU sends at 100 Hz; redraw its readout at 10 Hz so the numbers can
+   be read and the SPI link is not kept busy. */
+#define IMU_UI_PERIOD_MS        100U
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -60,7 +79,7 @@ SPI_HandleTypeDef hspi1;
 SPI_HandleTypeDef hspi2;
 
 /* USER CODE BEGIN PV */
-/* Main display (speed, state of charge, status) on SPI1. */
+/* Main display (speed, state of charge, status, IMU) on SPI1. */
 static const lcd_port_t s_lcd_main = {
   .hspi = &hspi1,
   .cs_port = TFT_CS_GPIO_Port,   .cs_pin = TFT_CS_Pin,
@@ -75,6 +94,20 @@ static const lcd_port_t s_lcd_aux = {
   .dc_port = TFT2_DC_GPIO_Port,   .dc_pin = TFT2_DC_Pin,
   .rst_port = TFT2_RST_GPIO_Port, .rst_pin = TFT2_RST_Pin,
 };
+
+/* Latest IMU frame of each kind, raw counts. */
+typedef struct
+{
+  int16_t  raw[3];
+  uint32_t rx_tick;
+  bool     seen;
+} imu_sample_t;
+
+static imu_sample_t s_imu[DASH_IMU_COUNT];
+static uint8_t s_imu_calib_stat;
+
+/* Raw counts per unit, in dash_imu_t order. */
+static const int32_t k_imu_lsb_per_unit[DASH_IMU_COUNT] = {100, 16, 16, 16};
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -88,6 +121,8 @@ static void MX_SPI2_Init(void);
 static void gui_init(void);
 static void can_poll(void);
 static void handle_can_frame(can_bus_t bus, const can_frame_t *frame);
+static bool handle_imu_frame(const can_frame_t *frame);
+static void imu_show(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -466,6 +501,7 @@ static void gui_init(void)
    are alive. Runs in the main loop, so it may call the dash_ui setters. */
 static void can_poll(void)
 {
+  static uint32_t rx_count;   /* frames received on both buses since reset */
   can_frame_t frame;
 
   can_bus_service();
@@ -475,8 +511,12 @@ static void can_poll(void)
     while (can_bus_receive(bus, &frame))
     {
       handle_can_frame(bus, &frame);
+      rx_count++;
     }
   }
+
+  dash_ui_set_can_rx_count(rx_count);
+  imu_show();
 
   dash_ui_set_can_status(can_bus_is_active(CAN_BUS_1, CAN_ACTIVE_TIMEOUT_MS),
                          can_bus_is_active(CAN_BUS_2, CAN_ACTIVE_TIMEOUT_MS));
@@ -487,6 +527,11 @@ static void can_poll(void)
 static void handle_can_frame(can_bus_t bus, const can_frame_t *frame)
 {
   (void)bus;
+
+  if (handle_imu_frame(frame))
+  {
+    return;
+  }
 
   if (!frame->extended && (frame->id == CAN_NOTIFICATION_ID) &&
       (frame->len == 8U) &&
@@ -500,6 +545,86 @@ static void handle_can_frame(can_bus_t bus, const can_frame_t *frame)
       (frame->data[7] == 0x00U))
   {
     dash_ui_show_can_notification();
+  }
+}
+
+/* Store an IMU frame (IDs 0x100..0x103, from either bus). Returns false if
+   `frame` is not one. */
+static bool handle_imu_frame(const can_frame_t *frame)
+{
+  uint32_t row;
+  imu_sample_t *s;
+
+  if (frame->extended || (frame->id < CAN_ID_IMU_FIRST) ||
+      (frame->id >= (CAN_ID_IMU_FIRST + (uint32_t)DASH_IMU_COUNT)))
+  {
+    return false;
+  }
+  row = frame->id - CAN_ID_IMU_FIRST;
+  if (frame->len < ((row == (uint32_t)DASH_IMU_EULER) ? IMU_CALIB_FRAME_LEN : IMU_FRAME_LEN))
+  {
+    return true;  /* an IMU ID, but too short to decode */
+  }
+
+  s = &s_imu[row];
+  for (uint32_t i = 0U; i < 3U; i++)
+  {
+    s->raw[i] = (int16_t)((uint16_t)frame->data[2U * i] | ((uint16_t)frame->data[(2U * i) + 1U] << 8));
+  }
+  if (row == (uint32_t)DASH_IMU_EULER)
+  {
+    s_imu_calib_stat = frame->data[6];
+  }
+  s->rx_tick = frame->rx_tick;
+  s->seen = true;
+  return true;
+}
+
+/* Raw counts to tenths of a unit, rounded to nearest. */
+static int32_t imu_to_tenths(int16_t raw, int32_t lsb_per_unit)
+{
+  const int32_t n = (int32_t)raw * 10;
+
+  return (n >= 0) ? ((n + (lsb_per_unit / 2)) / lsb_per_unit)
+                  : -((-n + (lsb_per_unit / 2)) / lsb_per_unit);
+}
+
+/* Update the IMU readout every IMU_UI_PERIOD_MS. A row whose frame stopped
+   arriving shows "--". */
+static void imu_show(void)
+{
+  static uint32_t last_ms;
+  const uint32_t now = HAL_GetTick();
+
+  if ((now - last_ms) < IMU_UI_PERIOD_MS)
+  {
+    return;
+  }
+  last_ms = now;
+
+  for (uint32_t row = 0U; row < (uint32_t)DASH_IMU_COUNT; row++)
+  {
+    const imu_sample_t *s = &s_imu[row];
+    const int32_t lsb = k_imu_lsb_per_unit[row];
+
+    if (s->seen && ((now - s->rx_tick) < IMU_TIMEOUT_MS))
+    {
+      dash_ui_set_imu((dash_imu_t)row, imu_to_tenths(s->raw[0], lsb),
+                      imu_to_tenths(s->raw[1], lsb), imu_to_tenths(s->raw[2], lsb));
+    }
+    else
+    {
+      dash_ui_set_imu((dash_imu_t)row, DASH_NO_DATA, DASH_NO_DATA, DASH_NO_DATA);
+    }
+  }
+
+  if (s_imu[DASH_IMU_EULER].seen && ((now - s_imu[DASH_IMU_EULER].rx_tick) < IMU_TIMEOUT_MS))
+  {
+    dash_ui_set_imu_calib((int32_t)((s_imu_calib_stat >> 6) & 0x3U));  /* system level */
+  }
+  else
+  {
+    dash_ui_set_imu_calib(DASH_NO_DATA);
   }
 }
 /* USER CODE END 4 */

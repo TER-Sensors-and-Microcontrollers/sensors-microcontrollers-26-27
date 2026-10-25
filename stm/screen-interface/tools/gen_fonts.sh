@@ -27,9 +27,10 @@ ICON_RANGE=0xF071,0xF240,0xF0E7,0xF2C9
 
 mkdir -p "$OUT"
 
-# Default font: captions and units. ASCII plus the degree sign.
+# Default font: captions and units. ASCII plus the degree, superscript two
+# and micro signs (m/s² and µT in the IMU readout).
 $CONV "${COMMON[@]}" --size 14 --lv-font-name dash_font_14 \
-  --font "$TEXT" -r 0x20-0x7E,0xB0 \
+  --font "$TEXT" -r 0x20-0x7E,0xB0,0xB2,0xB5 \
   -o "$OUT/dash_font_14.c"
 
 # Secondary readouts: digits, sign, decimal point, % V A kW C and degree,

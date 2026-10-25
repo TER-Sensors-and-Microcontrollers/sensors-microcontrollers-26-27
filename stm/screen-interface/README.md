@@ -84,6 +84,7 @@ Main display:
 - READY and FAULT indicators along the top
 - a 270 degree speed gauge with the speed in the middle
 - state of charge as a bar and a percentage
+- the IMU readout (real data, see below)
 
 Second display:
 
@@ -97,6 +98,32 @@ To show real data, decode the frames in `handle_can_frame()` (`Core/Src/main.c`)
 The dashboard displays `CAN 0x123 EVENT` on both screens after receiving a
 standard CAN frame with ID `0x123`, length 8, and data
 `FF 00 FF 00 FF 00 FF 00`. The notification remains visible until reset.
+
+Both screens also show `RX <count>`: the number of CAN frames received on
+either bus since reset (any ID). On the main display it is in the bottom-left
+corner; on the second display, under the CAN1/CAN2 row.
+
+### IMU readout
+
+The main display shows the BNO055 IMU data sent by `stm/can-frame-test`
+(standard IDs, on either bus; each value a little-endian int16 of raw BNO055
+counts):
+
+| ID | Payload | Scale | Shown as |
+|----|---------|-------|----------|
+| `0x100` | accel x, y, z (6 bytes) | 100 LSB = 1 m/s² | ACC, m/s² |
+| `0x101` | gyro x, y, z (6 bytes) | 16 LSB = 1 °/s | GYRO, °/s |
+| `0x102` | mag x, y, z (6 bytes) | 16 LSB = 1 µT | MAG, µT |
+| `0x103` | heading, roll, pitch (6 bytes) + `CALIB_STAT` (byte 6) | 16 LSB = 1° | ANGLE, ° |
+
+Values show one decimal below 100 and whole numbers above. The readout
+refreshes at 10 Hz (`IMU_UI_PERIOD_MS`), and a row shows `--` if its frame
+has not arrived in the last 500 ms (`IMU_TIMEOUT_MS`). `CAL n` is the BNO055
+system calibration level from `CALIB_STAT`: 0 (red, uncalibrated) to 3
+(green, fully calibrated). The fused angles are unreliable until it reaches 3.
+
+Decoding is in `handle_imu_frame()` in `Core/Src/main.c`; the IDs and scales
+must match `CAN_ID_IMU_*` in `stm/can-frame-test/Core/Src/main.c`.
 
 To move a metric to the other screen, move its widgets between `create_main_screen()` and `create_aux_screen()` in `Core/Src/dash_ui.c`. The setters do not need to change.
 
