@@ -22,7 +22,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdbool.h>
-#include "bno055.h"
+#include "bno08x.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -124,13 +124,13 @@ void BSP_PB_Callback(Button_TypeDef Button)
     }
 }
 
-/* ---- BNO055 IMU -> CAN1 --------------------------------------------------
- * All payloads are little-endian int16 raw BNO055 counts:
+/* ---- BNO08x IMU -> CAN1 --------------------------------------------------
+ * All payloads use the existing little-endian int16 CAN units:
  *   0x100 accel  x,y,z            1 m/s^2 = 100 LSB          (6 bytes)
  *   0x101 gyro   x,y,z            1 dps   = 16 LSB           (6 bytes)
  *   0x102 mag    x,y,z            1 uT    = 16 LSB           (6 bytes)
  *   0x103 euler  heading,roll,pitch  1 deg = 16 LSB,
- *         byte 6 = CALIB_STAT (sys|gyro|accel|mag, 2 bits each),
+ *         byte 6 = accuracy (rotation|gyro|accel|mag, 2 bits each),
  *         byte 7 = 7-bit I2C address the IMU acknowledged at       (8 bytes)
  */
 #define CAN_ID_IMU_ACCEL    0x100U
@@ -138,33 +138,19 @@ void BSP_PB_Callback(Button_TypeDef Button)
 #define CAN_ID_IMU_MAG      0x102U
 #define CAN_ID_IMU_EULER    0x103U
 
-#define I2C_SCAN_FIRST      0x08U            /* 0x00-0x07 and 0x78-0x7F are reserved */
-#define I2C_SCAN_LAST       0x77U
-#define IMU_PERIOD_MS       10U              /* 100 Hz, the BNO055 fusion rate */
+#define IMU_PERIOD_MS       10U              /* request reports at 100 Hz */
 #define IMU_RETRY_MS        1000U            /* re-init interval while the IMU is missing */
 #define IMU_MAX_READ_FAILS  5U
 
-static bno055_t imu;
+static bno08x_t imu;
 static bool imu_ok = false;
 static uint8_t imu_addr = 0;  /* 7-bit address of the IMU being forwarded, 0 = none */
 
-/* Addresses every 7-bit I2C address from 'from' up and returns the first one
-   that ACKs, or 0 if none do. A NACK costs ~0.1 ms, so a full scan is ~12 ms. */
-static uint8_t i2c1_find_next(uint8_t from)
-{
-  for (uint8_t a = from; a <= I2C_SCAN_LAST; a++) {
-    if (HAL_I2C_IsDeviceReady(&hi2c1, (uint16_t)(a << 1), 1, 2) == HAL_OK)
-      return a;
-  }
-  return 0;
-}
-
-/* Scans the bus and starts forwarding from the first address that ACKs and
-   identifies as a BNO055. Other devices that ACK are skipped. */
+/* Try both BNO08x addresses; init verifies an SH-2 product-ID response. */
 static bool imu_find_and_init(void)
 {
-  for (uint8_t a = i2c1_find_next(I2C_SCAN_FIRST); a != 0; a = i2c1_find_next(a + 1)) {
-    if (bno055_probe(&hi2c1, a) && bno055_init(&imu, &hi2c1, a) == HAL_OK) {
+  for (uint8_t a = BNO08X_ADDR_LOW; a <= BNO08X_ADDR_HIGH; a++) {
+    if (bno08x_init(&imu, &hi2c1, a, IMU_PERIOD_MS) == HAL_OK) {
       imu_addr = a;
       return true;
     }
@@ -174,7 +160,7 @@ static bool imu_find_and_init(void)
 }
 
 /* Frees an I2C bus left stuck by a transfer that was cut off by an MCU reset:
-   clock SCL (PB8) until the BNO055 releases SDA (PB7), then re-init I2C1. */
+   clock SCL (PB8) until the IMU releases SDA (PB7), then re-init I2C1. */
 static void i2c1_recover(void)
 {
   GPIO_InitTypeDef g = {0};
@@ -241,8 +227,10 @@ static void imu_service(void)
   if ((int32_t)(now - next_sample) >= 0)   /* fell behind: don't burst to catch up */
     next_sample = now + IMU_PERIOD_MS;
 
-  bno055_data_t d;
-  if (bno055_read(&imu, &d) != HAL_OK) {
+  bno08x_data_t d;
+  HAL_StatusTypeDef st = bno08x_read(&imu, &d);
+  if (st == HAL_BUSY) return;  /* asynchronous reports: no new data yet */
+  if (st != HAL_OK) {
     if (++fails >= IMU_MAX_READ_FAILS) imu_ok = false;  /* re-init on next pass */
     return;
   }
