@@ -49,6 +49,13 @@ static int16_t le16(const uint8_t *p)
   return (int16_t)((uint16_t)p[0] | ((uint16_t)p[1] << 8));
 }
 
+bool bno055_probe(I2C_HandleTypeDef *hi2c, uint8_t addr7)
+{
+  bno055_t dev = { .hi2c = hi2c, .addr = (uint16_t)(addr7 << 1) };
+  uint8_t id = 0;
+  return read_regs(&dev, REG_CHIP_ID, &id, 1) == HAL_OK && id == CHIP_ID_VALUE;
+}
+
 HAL_StatusTypeDef bno055_init(bno055_t *dev, I2C_HandleTypeDef *hi2c, uint8_t addr7)
 {
   dev->hi2c = hi2c;

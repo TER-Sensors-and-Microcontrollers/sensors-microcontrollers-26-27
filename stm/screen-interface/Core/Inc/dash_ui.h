@@ -55,6 +55,10 @@ void dash_ui_set_imu(dash_imu_t row, int32_t a_x10, int32_t b_x10, int32_t c_x10
 /* IMU system calibration level, 0 (none) to 3 (full), or DASH_NO_DATA. */
 void dash_ui_set_imu_calib(int32_t level);
 
+/* 7-bit I2C address the IMU answered at, shown as "0x28", or DASH_NO_DATA
+   for "0x--". */
+void dash_ui_set_imu_addr(int32_t addr7);
+
 /* Second display */
 void dash_ui_set_temps(int32_t motor_c, int32_t batt_c);
 void dash_ui_set_can_status(bool can1_ok, bool can2_ok);

@@ -13,6 +13,7 @@
 #define BNO055_H
 
 #include "main.h"
+#include <stdbool.h>
 #include <stdint.h>
 
 #define BNO055_ADDR_LOW   0x28U  /* ADR pin low (default on most breakouts) */
@@ -30,6 +31,10 @@ typedef struct {
   int16_t euler[3];           /* heading, roll, pitch */
   uint8_t calib;              /* CALIB_STAT: [7:6] sys, [5:4] gyro, [3:2] accel, [1:0] mag; 3 = fully calibrated */
 } bno055_data_t;
+
+/* Reads the chip ID once; true if a booted BNO055 answers at addr7. Fast
+   (~0.3 ms), so it can be used to filter results of a bus scan. */
+bool bno055_probe(I2C_HandleTypeDef *hi2c, uint8_t addr7);
 
 /* Resets the chip and puts it in NDOF mode. Blocks for roughly 0.7-1.5 s. */
 HAL_StatusTypeDef bno055_init(bno055_t *dev, I2C_HandleTypeDef *hi2c, uint8_t addr7);

@@ -64,7 +64,9 @@
 #define SOC_BAR_H           12
 
 /* IMU table: a header row, accel / gyro / mag rows, a second header row,
-   then the Euler angles. Values are right-aligned on the column edges. */
+   then the Euler angles. Values are right-aligned on the column edges. The
+   calibration level sits at the end of the first header row and the IMU's
+   I2C address at the start of the second. */
 #define IMU_Y               208
 #define IMU_ROW_H           16
 #define IMU_COL_RIGHT_0     102     /* right edge of the first value column */
@@ -109,6 +111,7 @@ static lv_obj_t *s_main_can_notification;
 static lv_obj_t *s_main_rx_label;
 static lv_obj_t *s_imu_value[DASH_IMU_COUNT][3];
 static lv_obj_t *s_imu_calib;
+static lv_obj_t *s_imu_addr;
 
 /* Second display */
 static temp_panel_t s_motor;
@@ -126,6 +129,7 @@ static bool s_can_ok[2];
 static uint32_t s_can_rx_count;
 static int32_t s_imu_shown[DASH_IMU_COUNT][3];
 static int32_t s_imu_calib_shown;
+static int32_t s_imu_addr_shown;
 
 /* ---- Helpers --------------------------------------------------------------*/
 
@@ -377,6 +381,9 @@ static void make_imu_table(lv_obj_t *scr)
   make_imu_row(scr, DASH_IMU_GYRO, "GYRO", DEGREE "/s", IMU_Y + (2 * IMU_ROW_H));
   make_imu_row(scr, DASH_IMU_MAG, "MAG", MICRO "T", IMU_Y + (3 * IMU_ROW_H));
   make_imu_heading(scr, hrp, IMU_Y + (4 * IMU_ROW_H));
+  s_imu_addr = make_label(scr, "0x--", &dash_font_14, COLOR_MUTED);
+  lv_obj_align(s_imu_addr, LV_ALIGN_TOP_LEFT, MARGIN, IMU_Y + (4 * IMU_ROW_H));
+  s_imu_addr_shown = DASH_NO_DATA;
   make_imu_row(scr, DASH_IMU_EULER, "ANGLE", DEGREE, IMU_Y + (5 * IMU_ROW_H));
 }
 
@@ -623,6 +630,24 @@ void dash_ui_set_imu_calib(int32_t level)
   }
   lv_label_set_text_fmt(s_imu_calib, "CAL %" LV_PRId32, level);
   lv_obj_set_style_text_color(s_imu_calib, color, 0);
+}
+
+void dash_ui_set_imu_addr(int32_t addr7)
+{
+  if (addr7 == s_imu_addr_shown)
+  {
+    return;
+  }
+  s_imu_addr_shown = addr7;
+
+  if (addr7 == DASH_NO_DATA)
+  {
+    lv_label_set_text(s_imu_addr, "0x--");
+    lv_obj_set_style_text_color(s_imu_addr, COLOR_MUTED, 0);
+    return;
+  }
+  lv_label_set_text_fmt(s_imu_addr, "0x%02X", (unsigned int)addr7 & 0x7FU);
+  lv_obj_set_style_text_color(s_imu_addr, COLOR_TEXT, 0);
 }
 
 void dash_ui_set_can_rx_count(uint32_t count)

@@ -50,10 +50,13 @@
      0x101 gyro  x, y, z            16 LSB per deg/s   (6 bytes)
      0x102 mag   x, y, z            16 LSB per uT      (6 bytes)
      0x103 heading, roll, pitch     16 LSB per degree, byte 6 = CALIB_STAT
-           (sys | gyro | accel | mag, 2 bits each)     (7 bytes)
-   The IDs are consecutive and in dash_imu_t order. */
+           (sys | gyro | accel | mag, 2 bits each), byte 7 = 7-bit I2C
+           address the IMU answered at                 (8 bytes)
+   The IDs are consecutive and in dash_imu_t order. A 7-byte 0x103 (older
+   sender firmware, no address) is still decoded; the address shows "0x--". */
 #define CAN_ID_IMU_FIRST        0x100U
 #define IMU_CALIB_FRAME_LEN     7U
+#define IMU_ADDR_FRAME_LEN      8U
 #define IMU_FRAME_LEN           6U
 
 /* An IMU row shows "--" if its frame is older than this. */
@@ -105,6 +108,7 @@ typedef struct
 
 static imu_sample_t s_imu[DASH_IMU_COUNT];
 static uint8_t s_imu_calib_stat;
+static int32_t s_imu_addr = DASH_NO_DATA;  /* 7-bit I2C address, from 0x103 */
 
 /* Raw counts per unit, in dash_imu_t order. */
 static const int32_t k_imu_lsb_per_unit[DASH_IMU_COUNT] = {100, 16, 16, 16};
@@ -574,6 +578,9 @@ static bool handle_imu_frame(const can_frame_t *frame)
   if (row == (uint32_t)DASH_IMU_EULER)
   {
     s_imu_calib_stat = frame->data[6];
+    /* The sender uses 0 for "no IMU". */
+    s_imu_addr = ((frame->len >= IMU_ADDR_FRAME_LEN) && (frame->data[7] != 0U))
+                 ? (int32_t)frame->data[7] : DASH_NO_DATA;
   }
   s->rx_tick = frame->rx_tick;
   s->seen = true;
@@ -621,10 +628,12 @@ static void imu_show(void)
   if (s_imu[DASH_IMU_EULER].seen && ((now - s_imu[DASH_IMU_EULER].rx_tick) < IMU_TIMEOUT_MS))
   {
     dash_ui_set_imu_calib((int32_t)((s_imu_calib_stat >> 6) & 0x3U));  /* system level */
+    dash_ui_set_imu_addr(s_imu_addr);
   }
   else
   {
     dash_ui_set_imu_calib(DASH_NO_DATA);
+    dash_ui_set_imu_addr(DASH_NO_DATA);
   }
 }
 /* USER CODE END 4 */
