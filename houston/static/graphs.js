@@ -32,65 +32,69 @@ if (!start) {
         - sensor(s) with given id must exist within database
 */
 
+// --- Sliding window settings ---
+// true  = each graph only keeps its newest MAX_POINTS points (old ones drop off the left)
+// false = graphs keep every point forever
+const SLIDING_WINDOW = true;
+const MAX_POINTS = 100;
+
+// each graph's bookmark: the reading_id of the newest point it has drawn
+let lastId = JSON.parse(sessionStorage.getItem("lastId") || '{"graph1":0,"graph2":0,"graph3":0}');
+
+/*
+    trimGraph
+
+    If the sliding window is on, removes the oldest points so the graph
+    holds at most MAX_POINTS. If it's off, does nothing.
+*/
+function trimGraph(g) {
+    if (!SLIDING_WINDOW) return;
+    const extra = g.data.labels.length - MAX_POINTS;
+    if (extra > 0) {
+        g.data.labels.splice(0, extra);
+        g.data.datasets[0].data.splice(0, extra);
+    }
+}
+
+
 async function updateGraph(sid, g)
-{
-    
+{   
     try{
-        const response = await fetch('/get_dp/' + sid);
+        const since = lastId[g.canvas.id] || 0;
+        const response = await fetch('/get_since/' + sid + '/' + since);
         if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+            throw new Error(`HTTP error! status: ${response.status}`);
         }
 
-        const reading = await response.json();
-        
+        const rows = await response.json();
+        if (rows.length === 0) return;      // nothing new: draw nothing, no repeated point
 
-        if (reading.error) {
-            console.log("Error: No data found");
-            return;
+        for (const r of rows) {
+            g.data.labels.push(r.timestamp - (start / 1000));
+            g.data.datasets[0].data.push(r.data);
         }
+        lastId[g.canvas.id] = rows[rows.length - 1].reading_id;
+        sessionStorage.setItem("lastId", JSON.stringify(lastId));
+        trimGraph(g);
 
-        // update graphs
-        // we only divide start by 1000 since timestamp is already given to us in seconds
-        g.data.labels.push(reading.timestamp - (start / 1000));
-        g.data.datasets[0].data.push(reading.data);
+        g.options.title.text = rows[0].name + " (" + rows[0].unit + ") Over Time";
+        g.update(0);                         // one redraw for the whole batch, no animation
 
-        g.options.title.text = reading.name + " (" + reading.unit + ") Over Time"
-        g.update();
-
-        // save chart to client's cache so that it can be reloaded on refresh
         saveToSessionStorage(g.canvas.id, {
             labels: g.data.labels,
             datasets: g.data.datasets.map(ds => ({
                 backgroundColor: ds.backgroundColor,
                 borderColor: ds.borderColor,
                 data: ds.data
-            })),
-            options: {
-                title: {
-                    display: true,
-                    // text: reading1.name + " Over Time"
-                }
-            }
-        })
-        saveToSessionStorage(scatter.canvas.id, {
-            labels: scatter.data.labels,
-            datasets: scatter.data.datasets.map(ds => ({
-                label: reading1.name + " vs " + reading2.name,
-                backgroundColor: ds.backgroundColor,
-                borderColor: ds.borderColor,
-                data: ds.data
-            })),
-            options: {
-                title: {
-                    display: true,
-                    text: reading1.name + " vs " + reading2.name
-            }
-    }})
+            }))
+        });
     }
     catch (error) {
         console.error("Error fetching or parsing data:", error);
     }
 }
+        
+
 
 async function clearGraph(g) {
     g.data.labels = [];
@@ -285,13 +289,21 @@ document.addEventListener('DOMContentLoaded', function() {
         g.data.labels.push((all_data[r].timestamp - (start / 1000)));
         g.data.datasets[0].data.push(all_data[r].data);
     }
+
+    // bookmark the newest reading loaded, so updateGraph only fetches what comes after it
+    if (all_data.length > 0 && g !== scatter) {
+        lastId[g.canvas.id] = all_data[all_data.length - 1].reading_id;
+        sessionStorage.setItem("lastId", JSON.stringify(lastId));
+        trimGraph(g)
+    }
+
     if (g === scatter)
         g.options.title.text = currentY + " vs " + currentX;
     else
         g.options.title.text = all_data[0].name + " Over Time";
     g.update();
     
-    saveToSessionStorage(g1.canvas.id, {
+    saveToSessionStorage(g.canvas.id, {
             labels: g.data.labels,
             datasets: g.data.datasets.map(ds => ({
                 backgroundColor: ds.backgroundColor,
@@ -312,4 +324,4 @@ setInterval(() => {
     updateGraph(selectedValue1, g1);
     updateGraph(selectedValue2, g2);
     updateGraph(selectedValue3, g3);
-}, 1000);
+}, 500);

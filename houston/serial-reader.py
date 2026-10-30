@@ -48,6 +48,28 @@ def feeder(ser:serial.Serial):
         ser.write(data_to_send)
         time.sleep(.005)
 
+
+# read_frame
+# Reads ONE frame using its length byte instead of searching for a newline.
+# Frame layout: [ID ID][DLC][DLC data bytes][\n]
+# Because it reads exactly DLC data bytes, a 0x0A inside the data no longer
+# cuts the frame in half. If the frame doesn't end in \n, we're out of step,
+# so it throws away bytes up to the next newline to get back in line.
+def read_frame(ser):
+    header = ser.read(3)
+    if len(header) < 3:
+        return None
+    dlc = header[2]
+    if dlc > 8:
+        ser.readline()
+        return None
+    rest = ser.read(dlc + 1)
+    if len(rest) < dlc + 1 or rest[-1] != 0x0A:
+        ser.readline()                
+        return None
+    return header + rest
+
+
 # given incoming CAN frame, parse and return appropriate ID,DATA,DLC values.
 # if incoming frame is not of valid length, return all -1s
 # UNPACKS CAN_ID AS BIG ENDIAN!
@@ -60,8 +82,8 @@ def parse_frame(frame:bytes):
     dlc = frame[2]
     data = frame[3:3+dlc]
     if can_id < 0 or can_id > 2048 or dlc < 0 or dlc > 8:
-        print("Error: Malformed CAN frame")
-        print(f"Frame: {frame}")
+        # print("Error: Malformed CAN frame")
+        # print(f"Frame: {frame}")
         return -1,-1,-1
     return can_id, dlc, data
 
@@ -100,7 +122,7 @@ def reader(ser:serial.Serial, debug=True):
     try:
         while True:
             if ser.in_waiting > 0:
-                frame = ser.readline()
+                frame = read_frame(ser)
                 id,dlc,data = parse_frame(frame)
                 if id == -1:
                     if debug:
@@ -110,7 +132,7 @@ def reader(ser:serial.Serial, debug=True):
                 if debug:
                     print(f"RECIEVED: {time.time() - start:.2f}    ID: {id}    DLC: {dlc}    DATA: {data}")
                 if len(data) != 8: # skip chopped messages [tentatively]
-                    print(f"Error: data length is not 8!")
+                    # print(f"Error: data length is not 8!")
                     continue
                     
                 match id:

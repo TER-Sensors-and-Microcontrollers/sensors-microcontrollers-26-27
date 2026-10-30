@@ -65,6 +65,30 @@ def display_SD():
 OTHER ROUTES / ENDPOINTS
 """
 
+# /get_since/<sensor_id>/<last_id>
+#
+# returns every reading for this sensor with a reading_id greater than last_id,
+# oldest first, at most 500 at a time. If last_id is 0 (the graph has nothing yet),
+# returns the newest 500 instead, so a fresh graph starts at "now" instead of
+@app.route('/get_since/<int:sensor_id>/<int:last_id>')
+def get_since(sensor_id, last_id):
+    db = get_db()
+    cursor = db.cursor()
+    if last_id == 0:
+        cursor.execute(
+            "SELECT * FROM sensor_readings WHERE sensor_id = ? "
+            "ORDER BY reading_id DESC LIMIT 500",
+            (sensor_id,))
+        rows = cursor.fetchall()[::-1]   # flip back to oldest-first
+    else:
+        cursor.execute(
+            "SELECT * FROM sensor_readings WHERE sensor_id = ? AND reading_id > ? "
+            "ORDER BY reading_id LIMIT 500",
+            (sensor_id, last_id))
+        rows = cursor.fetchall()
+        cursor.close()
+    return jsonify([dict(r) for r in rows])
+
 # /readings
 # Grab entire db of sensor readings
 @app.route('/readings')
