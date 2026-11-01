@@ -78,12 +78,18 @@ void Error_Handler(void);
 #define TFT_DC_GPIO_Port GPIOC
 #define TFT_RST_Pin GPIO_PIN_9
 #define TFT_RST_GPIO_Port GPIOA
+#define BTN1_Pin GPIO_PIN_10
+#define BTN1_GPIO_Port GPIOA
+#define BTN1_EXTI_IRQn EXTI15_10_IRQn
 #define T_SWDIO_Pin GPIO_PIN_13
 #define T_SWDIO_GPIO_Port GPIOA
 #define T_SWCLK_Pin GPIO_PIN_14
 #define T_SWCLK_GPIO_Port GPIOA
 #define T_SWO_Pin GPIO_PIN_3
 #define T_SWO_GPIO_Port GPIOB
+#define BTN2_Pin GPIO_PIN_5
+#define BTN2_GPIO_Port GPIOB
+#define BTN2_EXTI_IRQn EXTI9_5_IRQn
 #define TFT_CS_Pin GPIO_PIN_6
 #define TFT_CS_GPIO_Port GPIOB
 

@@ -5,8 +5,9 @@
   *
   *          Main display: ready / fault indicators, speed gauge, state of
   *          charge and the IMU readout.
-  *          Second display: motor and battery temperatures, and whether each
-  *          CAN bus is receiving.
+  *          Second display: motor and battery temperatures, press counts
+  *          for the PA10 and PB5 buttons, and whether each CAN bus is
+  *          receiving.
   ******************************************************************************
   */
 #ifndef DASH_UI_H
@@ -63,11 +64,22 @@ void dash_ui_set_imu_addr(int32_t addr7);
 void dash_ui_set_temps(int32_t motor_c, int32_t batt_c);
 void dash_ui_set_can_status(bool can1_ok, bool can2_ok);
 
+/* Button press counters (second display). */
+typedef enum
+{
+  DASH_BTN_PA10 = 0,
+  DASH_BTN_PB5,
+  DASH_BTN_COUNT
+} dash_btn_t;
+
+void dash_ui_set_button_count(dash_btn_t button, uint32_t count);
+
 /* Both displays: number of CAN frames received on either bus since reset,
    shown as "RX <count>". */
 void dash_ui_set_can_rx_count(uint32_t count);
 
-/* Show that the configured CAN notification frame was received. */
+/* Show that the configured CAN notification frame was received. The
+   notification hides itself 1 s after the last call. */
 void dash_ui_show_can_notification(void);
 
 #ifdef __cplusplus

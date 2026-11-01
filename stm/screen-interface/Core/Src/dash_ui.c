@@ -5,8 +5,9 @@
   *
   *          Main display: ready / fault indicators, speed gauge, state of
   *          charge and the IMU readout.
-  *          Second display: motor and battery temperatures, and whether each
-  *          CAN bus is receiving.
+  *          Second display: motor and battery temperatures, press counts
+  *          for the PA10 and PB5 buttons, and whether each CAN bus is
+  *          receiving.
   *
   *          The SPI link only moves ~1.3 MB/s (a full screen is ~120 ms), so
   *          every setter touches only its own widgets and only when the value
@@ -75,15 +76,19 @@
 #define IMU_HEADING_INSET   16      /* heading centre, left of the column edge */
 #define MAIN_FOOTER_Y       304
 
-/* Second display: two temperature panels, then the CAN row. Inside a panel
-   the offsets are from the panel's top edge. */
-#define MOTOR_PANEL_Y       12
-#define BATT_PANEL_Y        142
+/* Second display: two temperature panels, the button counters, then the
+   CAN row. Inside a panel the offsets are from the panel's top edge. */
+#define MOTOR_PANEL_Y       8
+#define BATT_PANEL_Y        128
 #define PANEL_VALUE_DY      22      /* top of the 72 px number */
 #define PANEL_BAR_DY        90
 #define PANEL_BAR_H         10
 #define PANEL_VALUE_RIGHT   164     /* the number's right edge, from the left */
-#define AUX_NOTIFICATION_Y  252
+#define BTN_ROW_Y           240     /* button counters, under the battery bar */
+#define AUX_NOTIFICATION_Y  262
+
+/* "CAN 0x123 EVENT" stays up this long after the last 0x123 frame. */
+#define CAN_NOTIFICATION_MS 1000U
 #define CAN_ROW_Y           288     /* CAN LEDs and captions centre on it */
 #define CAN_COLUMN_X        60      /* column centres are this far either side */
 #define CAN_RX_Y            300     /* RX count, under the CAN row */
@@ -118,7 +123,9 @@ static temp_panel_t s_motor;
 static temp_panel_t s_batt;
 static lv_obj_t *s_can_led[2];
 static lv_obj_t *s_aux_can_notification;
+static lv_timer_t *s_can_notification_timer;
 static lv_obj_t *s_aux_rx_label;
+static lv_obj_t *s_btn_value[DASH_BTN_COUNT];
 
 /* What is on screen now, so a setter can skip an unchanged value. */
 static int32_t s_speed;
@@ -127,6 +134,7 @@ static bool s_ready;
 static bool s_fault;
 static bool s_can_ok[2];
 static uint32_t s_can_rx_count;
+static uint32_t s_btn_shown[DASH_BTN_COUNT];
 static int32_t s_imu_shown[DASH_IMU_COUNT][3];
 static int32_t s_imu_calib_shown;
 static int32_t s_imu_addr_shown;
@@ -333,6 +341,18 @@ static lv_obj_t *make_right_label(lv_obj_t *scr, const char *text, int32_t x, in
   return label;
 }
 
+/* Button counter: caption ending just left of column x, count starting just
+   right of it, so the count grows to the right. */
+static lv_obj_t *make_button_counter(lv_obj_t *scr, const char *caption, int32_t x)
+{
+  const int32_t centre = (SCREEN_W / 2) + x;
+  lv_obj_t *value = make_label(scr, "0", &dash_font_14, COLOR_TEXT);
+
+  (void)make_right_label(scr, caption, centre - 4, BTN_ROW_Y, COLOR_MUTED);
+  lv_obj_align(value, LV_ALIGN_TOP_LEFT, centre + 4, BTN_ROW_Y);
+  return value;
+}
+
 static int32_t imu_col_right(uint32_t col)
 {
   return IMU_COL_RIGHT_0 + ((int32_t)col * IMU_COL_W);
@@ -467,6 +487,9 @@ static void create_aux_screen(lv_display_t *disp)
   make_temp_panel(scr, "MOTOR", MOTOR_PANEL_Y, &s_motor);
   make_temp_panel(scr, "BATTERY", BATT_PANEL_Y, &s_batt);
 
+  s_btn_value[DASH_BTN_PA10] = make_button_counter(scr, "PA10", -CAN_COLUMN_X);
+  s_btn_value[DASH_BTN_PB5] = make_button_counter(scr, "PB5", CAN_COLUMN_X);
+
   s_can_led[0] = make_can_indicator(scr, "CAN1", -CAN_COLUMN_X);
   s_can_led[1] = make_can_indicator(scr, "CAN2", CAN_COLUMN_X);
   s_aux_can_notification = make_can_notification(scr, LV_ALIGN_TOP_MID, 0, AUX_NOTIFICATION_Y);
@@ -477,14 +500,26 @@ static void create_aux_screen(lv_display_t *disp)
   s_can_ok[0] = false;
   s_can_ok[1] = false;
   s_can_rx_count = 0U;
+  s_btn_shown[DASH_BTN_PA10] = 0U;
+  s_btn_shown[DASH_BTN_PB5] = 0U;
 }
 
 /* ---- Public API -----------------------------------------------------------*/
+
+static void hide_can_notification(lv_timer_t *t)
+{
+  lv_obj_add_flag(s_main_can_notification, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_add_flag(s_aux_can_notification, LV_OBJ_FLAG_HIDDEN);
+  lv_timer_pause(t);
+}
 
 void dash_ui_create(lv_display_t *main_disp, lv_display_t *aux_disp)
 {
   create_main_screen(main_disp);
   create_aux_screen(aux_disp);
+
+  s_can_notification_timer = lv_timer_create(hide_can_notification, CAN_NOTIFICATION_MS, NULL);
+  lv_timer_pause(s_can_notification_timer);
 }
 
 void dash_ui_set_speed(int32_t speed)
@@ -563,6 +598,16 @@ void dash_ui_set_can_status(bool can1_ok, bool can2_ok)
       set_led(s_can_led[i], ok[i]);
     }
   }
+}
+
+void dash_ui_set_button_count(dash_btn_t button, uint32_t count)
+{
+  if ((button >= DASH_BTN_COUNT) || (count == s_btn_shown[button]))
+  {
+    return;
+  }
+  s_btn_shown[button] = count;
+  lv_label_set_text_fmt(s_btn_value[button], "%" LV_PRIu32, count);
 }
 
 void dash_ui_set_imu(dash_imu_t row, int32_t a_x10, int32_t b_x10, int32_t c_x10)
@@ -667,4 +712,7 @@ void dash_ui_show_can_notification(void)
 {
   lv_obj_clear_flag(s_main_can_notification, LV_OBJ_FLAG_HIDDEN);
   lv_obj_clear_flag(s_aux_can_notification, LV_OBJ_FLAG_HIDDEN);
+  /* Restart the hide countdown, so each frame keeps it up a bit longer. */
+  lv_timer_reset(s_can_notification_timer);
+  lv_timer_resume(s_can_notification_timer);
 }

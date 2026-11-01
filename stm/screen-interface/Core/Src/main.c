@@ -65,6 +65,10 @@
 /* The IMU sends at 100 Hz; redraw its readout at 10 Hz so the numbers can
    be read and the SPI link is not kept busy. */
 #define IMU_UI_PERIOD_MS        100U
+
+/* After a counted press, further edges on the same button are ignored for
+   this long, so contact bounce and quick re-presses count once. */
+#define BUTTON_DEBOUNCE_MS      500U
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -112,6 +116,15 @@ static int32_t s_imu_addr = DASH_NO_DATA;  /* 7-bit I2C address, from 0x103 */
 
 /* Raw counts per unit, in dash_imu_t order. */
 static const int32_t k_imu_lsb_per_unit[DASH_IMU_COUNT] = {100, 16, 16, 16};
+
+/* Button presses counted by the EXTI interrupt (BTN1 = PA10, BTN2 = PB5),
+   in dash_btn_t order. Written only in the interrupt, read in the main loop. */
+static volatile uint32_t s_btn_count[DASH_BTN_COUNT];
+/* Tick of the last counted press. Starts one debounce period in the past so
+   a press right after reset still counts. */
+static uint32_t s_btn_last_ms[DASH_BTN_COUNT] = {
+  0U - BUTTON_DEBOUNCE_MS, 0U - BUTTON_DEBOUNCE_MS,
+};
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -127,6 +140,7 @@ static void can_poll(void);
 static void handle_can_frame(can_bus_t bus, const can_frame_t *frame);
 static bool handle_imu_frame(const can_frame_t *frame);
 static void imu_show(void);
+static void buttons_show(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -199,6 +213,7 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
     can_poll();
+    buttons_show();
 
     /* Runs LVGL's timers: refresh of both screens and the dashboard's mock
        data. Sleep until the next one is due, but not so long that CAN frames
@@ -474,19 +489,22 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
   HAL_GPIO_Init(TFT_RST_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : PA10 */
-  GPIO_InitStruct.Pin = GPIO_PIN_10;
+  /*Configure GPIO pin : BTN1_Pin */
+  GPIO_InitStruct.Pin = BTN1_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+  HAL_GPIO_Init(BTN1_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : PB5 */
-  GPIO_InitStruct.Pin = GPIO_PIN_5;
+  /*Configure GPIO pin : BTN2_Pin */
+  GPIO_InitStruct.Pin = BTN2_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
+  HAL_GPIO_Init(BTN2_GPIO_Port, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI9_5_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
+
   HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
 
@@ -650,6 +668,43 @@ static void imu_show(void)
   {
     dash_ui_set_imu_calib(DASH_NO_DATA);
     dash_ui_set_imu_addr(DASH_NO_DATA);
+  }
+}
+
+/* Rising edge on a button pin (EXTI interrupt). Counts a press unless the
+   same button was counted less than BUTTON_DEBOUNCE_MS ago. */
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+  const uint32_t now = HAL_GetTick();
+  dash_btn_t btn;
+
+  if (GPIO_Pin == BTN1_Pin)
+  {
+    btn = DASH_BTN_PA10;
+  }
+  else if (GPIO_Pin == BTN2_Pin)
+  {
+    btn = DASH_BTN_PB5;
+  }
+  else
+  {
+    return;
+  }
+
+  if ((now - s_btn_last_ms[btn]) >= BUTTON_DEBOUNCE_MS)
+  {
+    s_btn_last_ms[btn] = now;
+    s_btn_count[btn]++;
+  }
+}
+
+/* Show the press counts. Runs in the main loop because LVGL must not be
+   called from an interrupt. */
+static void buttons_show(void)
+{
+  for (uint32_t i = 0U; i < (uint32_t)DASH_BTN_COUNT; i++)
+  {
+    dash_ui_set_button_count((dash_btn_t)i, s_btn_count[i]);
   }
 }
 /* USER CODE END 4 */

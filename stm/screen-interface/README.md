@@ -89,6 +89,7 @@ Main display:
 Second display:
 
 - motor and battery temperatures, each as a large number and a 0 to 100 °C bar
+- `PA10` and `PB5` button press counters (real, see [Buttons](#buttons))
 - CAN1 and CAN2 indicators, lit while that bus has received a frame in the last 500 ms. These are not mocked: they show real traffic.
 
 The values sweep through the colour thresholds in `Core/Src/dash_ui.c`: state of charge turns amber below 30% and red below 15%, temperatures turn amber from 60 °C and red from 80 °C, and FAULT lights at a motor temperature of 90 °C. Every 20 seconds the speed drops to "--" for 2 seconds to show the no-data state.
@@ -124,6 +125,23 @@ system calibration level from `CALIB_STAT`: 0 (red, uncalibrated) to 3
 
 Decoding is in `handle_imu_frame()` in `Core/Src/main.c`; the IDs and scales
 must match `CAN_ID_IMU_*` in `stm/can-frame-test/Core/Src/main.c`.
+
+### Buttons
+
+Two push buttons are read with EXTI interrupts, and the second display counts
+presses of each since reset:
+
+| Button | STM32 pin | Arduino header | Label | Interrupt |
+|--------|-----------|----------------|-------|-----------|
+| 1 | PA10 | D2 | `BTN1` | `EXTI15_10_IRQn` |
+| 2 | PB5  | D4 | `BTN2` | `EXTI9_5_IRQn` |
+
+Wire each button between the pin and 3.3 V. The pins use the internal
+pull-down and trigger on the rising edge, so a press counts as it goes down.
+`HAL_GPIO_EXTI_Callback()` in `Core/Src/main.c` counts a press and then ignores
+that button for 500 ms (`BUTTON_DEBOUNCE_MS`), which hides contact bounce; a
+second press within 500 ms is not counted. The main loop passes the counts to
+`dash_ui_set_button_count()`.
 
 To move a metric to the other screen, move its widgets between `create_main_screen()` and `create_aux_screen()` in `Core/Src/dash_ui.c`. The setters do not need to change.
 

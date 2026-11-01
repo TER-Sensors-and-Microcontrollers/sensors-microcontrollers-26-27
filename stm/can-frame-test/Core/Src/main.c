@@ -297,6 +297,9 @@ int main(void)
   if (HAL_FDCAN_Start(&hfdcan3) != HAL_OK) Error_Handler();
   /* USER CODE END 2 */
 
+  /* Initialize USER push-button, will be used to trigger an interrupt each time it's pressed.*/
+  BSP_PB_Init(BUTTON_USER, BUTTON_MODE_EXTI);
+
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   uint8_t payload1[8] = {0xFF,0x00,0xFF,0x00,0xFF,0x00,0xFF,0x00};
