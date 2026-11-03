@@ -43,6 +43,7 @@
 #define MAIN_LOOP_MAX_IDLE_MS   5U
 
 #define CAN_NOTIFICATION_ID     0x123U
+#define CAN_USER_BUTTON_ID_2    0x456U
 
 /* BNO055 IMU frames, as sent by stm/can-frame-test. Standard IDs; each
    payload is three little-endian int16 raw BNO055 counts:
@@ -540,6 +541,8 @@ static void gui_init(void)
 static void can_poll(void)
 {
   static uint32_t rx_count;   /* frames received on both buses since reset */
+  static uint32_t imu_count;
+  static uint32_t user_count;
   can_frame_t frame;
 
   can_bus_service();
@@ -550,10 +553,22 @@ static void can_poll(void)
     {
       handle_can_frame(bus, &frame);
       rx_count++;
+      if (!frame.extended)
+      {
+        if ((frame.id >= CAN_ID_IMU_FIRST) &&
+            (frame.id < (CAN_ID_IMU_FIRST + (uint32_t)DASH_IMU_COUNT)))
+        {
+          imu_count++;
+        }
+        else if ((frame.id == CAN_NOTIFICATION_ID) || (frame.id == CAN_USER_BUTTON_ID_2))
+        {
+          user_count++;
+        }
+      }
     }
   }
 
-  dash_ui_set_can_rx_count(rx_count);
+  dash_ui_set_can_rx_counts(rx_count, imu_count, user_count);
   imu_show();
 
   dash_ui_set_can_status(can_bus_is_active(CAN_BUS_1, CAN_ACTIVE_TIMEOUT_MS),

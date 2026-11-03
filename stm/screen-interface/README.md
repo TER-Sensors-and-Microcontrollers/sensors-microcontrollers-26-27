@@ -100,9 +100,10 @@ The dashboard displays `CAN 0x123 EVENT` on both screens after receiving a
 standard CAN frame with ID `0x123`, length 8, and data
 `FF 00 FF 00 FF 00 FF 00`. The notification remains visible until reset.
 
-Both screens also show `RX <count>`: the number of CAN frames received on
-either bus since reset (any ID). On the main display it is in the bottom-left
-corner; on the second display, under the CAN1/CAN2 row.
+Both screens show three CAN frame counters since reset, combined across both
+buses: `RX TOTAL` (any ID), `IMU` (standard IDs `0x100`–`0x103`), and `USER`
+(standard IDs `0x123` and `0x456`). These count frames, so one USER button press
+can add two if both transmitted frames arrive. Other IDs only add to the total.
 
 ### IMU readout
 

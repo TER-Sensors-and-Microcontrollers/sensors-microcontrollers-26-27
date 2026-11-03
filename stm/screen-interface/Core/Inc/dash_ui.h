@@ -74,9 +74,8 @@ typedef enum
 
 void dash_ui_set_button_count(dash_btn_t button, uint32_t count);
 
-/* Both displays: number of CAN frames received on either bus since reset,
-   shown as "RX <count>". */
-void dash_ui_set_can_rx_count(uint32_t count);
+/* Both displays: total, IMU and USER button CAN frames on either bus since reset. */
+void dash_ui_set_can_rx_counts(uint32_t total, uint32_t imu, uint32_t user);
 
 /* Show that the configured CAN notification frame was received. The
    notification hides itself 1 s after the last call. */

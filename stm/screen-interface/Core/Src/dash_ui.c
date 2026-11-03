@@ -53,14 +53,14 @@
 #define LED_SIZE            12
 
 /* Main display, top to bottom: status row, gauge, state of charge, IMU
-   table, then a footer with the RX count and the CAN notification. */
+   table, then a footer with the RX counts. */
 #define STATUS_Y            16      /* status icons and captions centre on it */
-#define GAUGE_Y             36
-#define GAUGE_SIZE          136
+#define GAUGE_Y             28
+#define GAUGE_SIZE          112
 #define GAUGE_WIDTH         10
 #define GAUGE_SPEED_DY      (-8)    /* offsets from the gauge centre */
 #define GAUGE_UNIT_DY       26
-#define SOC_Y               174
+#define SOC_Y               142
 #define SOC_BAR_W           78
 #define SOC_BAR_H           12
 
@@ -68,30 +68,30 @@
    then the Euler angles. Values are right-aligned on the column edges. The
    calibration level sits at the end of the first header row and the IMU's
    I2C address at the start of the second. */
-#define IMU_Y               208
+#define IMU_Y               176
 #define IMU_ROW_H           16
 #define IMU_COL_RIGHT_0     102     /* right edge of the first value column */
 #define IMU_COL_W           43      /* fits "-2000", the widest value */
 #define IMU_UNIT_X          (IMU_COL_RIGHT_0 + (2 * IMU_COL_W) + 6)
 #define IMU_HEADING_INSET   16      /* heading centre, left of the column edge */
-#define MAIN_FOOTER_Y       304
+#define MAIN_NOTIFICATION_Y 126
+#define CAN_RX_Y            272     /* three 16 px counter rows on both screens */
 
 /* Second display: two temperature panels, the button counters, then the
    CAN row. Inside a panel the offsets are from the panel's top edge. */
 #define MOTOR_PANEL_Y       8
-#define BATT_PANEL_Y        128
+#define BATT_PANEL_Y        112
 #define PANEL_VALUE_DY      22      /* top of the 72 px number */
 #define PANEL_BAR_DY        90
 #define PANEL_BAR_H         10
 #define PANEL_VALUE_RIGHT   164     /* the number's right edge, from the left */
-#define BTN_ROW_Y           240     /* button counters, under the battery bar */
-#define AUX_NOTIFICATION_Y  262
+#define BTN_ROW_Y           216     /* button counters, under the battery bar */
+#define AUX_NOTIFICATION_Y  236
 
 /* "CAN 0x123 EVENT" stays up this long after the last 0x123 frame. */
 #define CAN_NOTIFICATION_MS 1000U
-#define CAN_ROW_Y           288     /* CAN LEDs and captions centre on it */
+#define CAN_ROW_Y           260     /* CAN LEDs and captions centre on it */
 #define CAN_COLUMN_X        60      /* column centres are this far either side */
-#define CAN_RX_Y            300     /* RX count, under the CAN row */
 
 /* One temperature panel on the second display. */
 typedef struct
@@ -133,7 +133,9 @@ static int32_t s_soc;
 static bool s_ready;
 static bool s_fault;
 static bool s_can_ok[2];
-static uint32_t s_can_rx_count;
+static uint32_t s_can_rx_total;
+static uint32_t s_can_rx_imu;
+static uint32_t s_can_rx_user;
 static uint32_t s_btn_shown[DASH_BTN_COUNT];
 static int32_t s_imu_shown[DASH_IMU_COUNT][3];
 static int32_t s_imu_calib_shown;
@@ -470,10 +472,9 @@ static void create_main_screen(lv_display_t *disp)
 
   make_imu_table(scr);
 
-  /* Footer: RX count on the left, notification on the right. */
-  s_main_rx_label = make_label(scr, "RX 0", &dash_font_14, COLOR_MUTED);
-  lv_obj_align(s_main_rx_label, LV_ALIGN_TOP_LEFT, MARGIN, MAIN_FOOTER_Y);
-  s_main_can_notification = make_can_notification(scr, LV_ALIGN_TOP_RIGHT, -MARGIN, MAIN_FOOTER_Y);
+  s_main_rx_label = make_label(scr, "RX TOTAL 0\nIMU 0\nUSER 0", &dash_font_14, COLOR_MUTED);
+  lv_obj_align(s_main_rx_label, LV_ALIGN_TOP_LEFT, MARGIN, CAN_RX_Y);
+  s_main_can_notification = make_can_notification(scr, LV_ALIGN_TOP_MID, 0, MAIN_NOTIFICATION_Y);
   s_speed = DASH_NO_DATA;
   s_soc = DASH_NO_DATA;
   s_ready = false;
@@ -494,12 +495,14 @@ static void create_aux_screen(lv_display_t *disp)
   s_can_led[1] = make_can_indicator(scr, "CAN2", CAN_COLUMN_X);
   s_aux_can_notification = make_can_notification(scr, LV_ALIGN_TOP_MID, 0, AUX_NOTIFICATION_Y);
 
-  s_aux_rx_label = make_label(scr, "RX 0", &dash_font_14, COLOR_MUTED);
-  lv_obj_align(s_aux_rx_label, LV_ALIGN_TOP_MID, 0, CAN_RX_Y);
+  s_aux_rx_label = make_label(scr, "RX TOTAL 0\nIMU 0\nUSER 0", &dash_font_14, COLOR_MUTED);
+  lv_obj_align(s_aux_rx_label, LV_ALIGN_TOP_LEFT, MARGIN, CAN_RX_Y);
 
   s_can_ok[0] = false;
   s_can_ok[1] = false;
-  s_can_rx_count = 0U;
+  s_can_rx_total = 0U;
+  s_can_rx_imu = 0U;
+  s_can_rx_user = 0U;
   s_btn_shown[DASH_BTN_PA10] = 0U;
   s_btn_shown[DASH_BTN_PB5] = 0U;
 }
@@ -695,17 +698,20 @@ void dash_ui_set_imu_addr(int32_t addr7)
   lv_obj_set_style_text_color(s_imu_addr, COLOR_TEXT, 0);
 }
 
-void dash_ui_set_can_rx_count(uint32_t count)
+void dash_ui_set_can_rx_counts(uint32_t total, uint32_t imu, uint32_t user)
 {
-  if (count == s_can_rx_count)
+  if ((total == s_can_rx_total) && (imu == s_can_rx_imu) && (user == s_can_rx_user))
   {
     return;
   }
-  s_can_rx_count = count;
+  s_can_rx_total = total;
+  s_can_rx_imu = imu;
+  s_can_rx_user = user;
 
-  /* Centre-aligned labels re-centre themselves as the text grows. */
-  lv_label_set_text_fmt(s_main_rx_label, "RX %" LV_PRIu32, count);
-  lv_label_set_text_fmt(s_aux_rx_label, "RX %" LV_PRIu32, count);
+  lv_label_set_text_fmt(s_main_rx_label, "RX TOTAL %" LV_PRIu32 "\nIMU %" LV_PRIu32 "\nUSER %" LV_PRIu32,
+                        total, imu, user);
+  lv_label_set_text_fmt(s_aux_rx_label, "RX TOTAL %" LV_PRIu32 "\nIMU %" LV_PRIu32 "\nUSER %" LV_PRIu32,
+                        total, imu, user);
 }
 
 void dash_ui_show_can_notification(void)
