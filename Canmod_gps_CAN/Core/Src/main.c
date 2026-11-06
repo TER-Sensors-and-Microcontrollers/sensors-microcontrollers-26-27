@@ -120,8 +120,8 @@ int main(void)
   // Reject other unmatched frames and remote frames
   if (HAL_FDCAN_ConfigGlobalFilter(
           &hfdcan1,
-          FDCAN_REJECT,
-          FDCAN_REJECT,
+          FDCAN_ACCEPT_IN_RX_FIFO0,
+          FDCAN_ACCEPT_IN_RX_FIFO0,
           FDCAN_REJECT_REMOTE,
           FDCAN_REJECT_REMOTE) != HAL_OK)
   {
@@ -179,8 +179,9 @@ int main(void)
 
             uart_print(buf);
 
-            // Print all eight bytes (Classic CAN test)
-            uint8_t len = RxHeader.DataLength >> 16;
+            // Print the valid data bytes (handles both DLC encodings)
+            uint32_t dl = RxHeader.DataLength;
+            uint8_t len = (dl > 8) ? (uint8_t)(dl >> 16) : (uint8_t)dl;
             if (len > 8) len = 8;
 
             for (int i = 0; i < len; i++)
@@ -191,6 +192,22 @@ int main(void)
 
             uart_print("\r\n");
         }
+    }
+
+    static uint32_t last = 0;
+    if (HAL_GetTick() - last >= 1000)
+    {
+        last = HAL_GetTick();
+        FDCAN_ProtocolStatusTypeDef ps;
+        FDCAN_ErrorCountersTypeDef ec;
+        HAL_FDCAN_GetProtocolStatus(&hfdcan1, &ps);
+        HAL_FDCAN_GetErrorCounters(&hfdcan1, &ec);
+        snprintf(buf, sizeof(buf),
+                "LEC=%lu ACT=0x%lX BO=%lu EP=%lu TEC=%lu REC=%lu\r\n",
+                (unsigned long)ps.LastErrorCode, (unsigned long)ps.Activity,
+                (unsigned long)ps.BusOff, (unsigned long)ps.ErrorPassive,
+                (unsigned long)ec.TxErrorCnt, (unsigned long)ec.RxErrorCnt);
+        uart_print(buf);
     }
 
     /* USER CODE END WHILE */
