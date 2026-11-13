@@ -22,6 +22,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 /* USER CODE END Includes */
 
@@ -130,11 +131,13 @@ int main(void)
     uint32_t raw = HAL_ADC_GetValue(&hadc1); 
     uint32_t mv = raw * 3300UL / 4095UL; // millivolts 
     uint32_t pct = raw * 1000UL / 4095UL; // tenths of a percent 
-    
+    int32_t angle_x10 = ((int32_t)raw * 3600L / 4095L) - 1800L;
+
     char msg[64]; 
     int len = snprintf(msg, sizeof(msg), 
-      "raw=%4lu %lu mV %lu.%lu%%\r\n", 
-      raw, mv, pct / 10, pct % 10); 
+    "raw=%4lu %lu mV %lu.%lu%% Angle=%ld.%ld deg\r\n",
+    raw, mv, pct / 10, pct % 10,
+    angle_x10 / 10, labs(angle_x10 % 10));
     HAL_UART_Transmit(&huart2, (uint8_t *)msg, len, 100);
    } 
    HAL_ADC_Stop(&hadc1); 
