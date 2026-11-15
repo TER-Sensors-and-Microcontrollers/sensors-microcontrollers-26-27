@@ -1,0 +1,6 @@
+# Python dependency file to be used in Dockerfile compilation
+# ADD NECESSARY PYTHON LIBRARIES HERE:
+
+pyserial
+msgpack
+python-can
