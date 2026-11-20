@@ -4,13 +4,34 @@
         <title> Flask App </title>
         <link rel = "stylesheet" type= "text/css" href = " {{ url_for('static', filename = 'style.css') }}">
     </head>
-    <body style = "background: linear-gradient(to bottom right, #ff7e5f, #feb47b); ">
+    <body>
         <div class = "title">
             <img src="https://sites.tufts.edu/racing/files/2020/04/cropped-newlogo-2.png"
             width="337.5" length="750"/>
         </div>
-        <button id = "upload">Upload Db File</button>
-        <input type = "file" id = "file-input" style = "display: none">
+
+        <div class = "sd-page">
+            <a class = "sd-back" href = "/">&larr; Back to live dashboard</a>
+            <h1>SD Card Data</h1>
+
+            <!-- upload button, hidden file picker, and a line for upload messages -->
+            <div class = "sd-upload">
+                <button id = "upload" class = "sd-button">Upload Db File</button>
+                <input type = "file" id = "file-input" style = "display: none">
+                <p id = "upload-status"></p>
+            </div>
+
+            <!-- graph of the uploaded recording -->
+            <div class = "sd-graph-area">
+                <select id = "sd-sensor">
+                    <option value = "" disabled selected>Select a sensor</option>
+                </select>
+                <canvas id = "sdGraph"></canvas>
+            </div>
+        </div>
+
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/2.9.4/Chart.js"></script>
+        <script src="{{ url_for('static', filename='sd.js') }}"></script>
         <script src="{{ url_for('static', filename='buttons.js') }}"></script>
     </body>
 </html>

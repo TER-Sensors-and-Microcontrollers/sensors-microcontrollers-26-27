@@ -23,14 +23,36 @@ document.addEventListener('DOMContentLoaded', function() {
       fileInput.click();
     });
 
-    fileInput.addEventListener("change", (e) => {
-      fileName = e.target.files[0];
-      length = fileName.name.length;
-      if (fileName.name[length - 3] == '.' && fileName.name[length - 2] == 'd' && fileName.name[length - 1] == 'b') {
-        console.log("Success!");
-      } else {
-        console.log("Not a DB File");
+    fileInput.addEventListener("change", async (e) => {
+      const status = document.getElementById("upload-status");
+      const file = e.target.files[0];
+      if (!file) return;                       // picker was closed without choosing
+
+      // quick check in the browser; the server checks again
+      if (!file.name.endsWith(".db")) {
+        status.textContent = "Not a DB file: " + file.name;
+        return;
       }
+
+      // package the file the same way curl -F "file=@..." does
+      const formData = new FormData();
+      formData.append("file", file);
+
+      status.textContent = "Uploading " + file.name + "...";
+      try {
+        const response = await fetch("/upload", { method: "POST", body: formData });
+        const result = await response.json();
+        if (response.ok) {
+          status.textContent = "Uploaded " + file.name + ": " + result.readings + " readings";
+        } else {
+          status.textContent = "Upload failed: " + result.error;
+        }
+      } catch (error) {
+        status.textContent = "Upload failed: could not reach the server";
+        console.error(error);
+      }
+
+      fileInput.value = "";                    // so picking the same file again still triggers "change"
     });
   }
 

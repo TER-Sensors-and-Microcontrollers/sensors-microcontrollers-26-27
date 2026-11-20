@@ -9,6 +9,8 @@ __pycache__
 
 # SQLite DB (don't want to commit the whole database)
 database.db
+houston/test/*.db
+houston/uploads/
 
 # --- Build Outputs ---
 # Ignore CMake compilation products and output binaries

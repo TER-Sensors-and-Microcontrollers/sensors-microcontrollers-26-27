@@ -4,9 +4,14 @@ async function getErrors() {
     const errors = await response.json();
     if (errors.error) return;
 
-    document.getElementById('errors').textContent = '';
+    const box = document.getElementById('errors');
+    if (errors.length === 0) {
+        box.textContent = 'No faults';     // so the box isn't just blank
+        return;
+    }
+    box.textContent = '';
     for (let i = 0; i < errors.length; i++) {
-        document.getElementById('errors').textContent += (errors[i].error + '\n');
+        box.textContent += (errors[i].error + '\n');
     }
 }
 

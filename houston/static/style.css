@@ -65,7 +65,7 @@ body {
     height: 100%;
     /* z-index: 999; */
 
-    background-color: aquamarine;
+    background-color: #000000;
 }
 
 .other {
@@ -120,3 +120,66 @@ body {
     padding: 0;
     background: linear-gradient(to bottom right, #ff7e5f, #feb47b);
 }*/
+
+/* ----------------------- SD card page ----------------------- */
+
+/* centers the page content and keeps it from stretching too wide */
+.sd-page {
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 0 20px 20px 20px;
+}
+
+/* "Back to live dashboard" link */
+.sd-back {
+    display: inline-block;
+    margin-top: 16px;
+    color: dodgerblue;
+    text-decoration: none;
+}
+.sd-back:hover {
+    text-decoration: underline;
+}
+
+/* puts the upload button and its message side by side */
+.sd-upload {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 16px;
+}
+.sd-upload p {
+    margin: 0;
+}
+
+/* blue button, same blue as the dashboard's readings panel */
+.sd-button {
+    background-color: dodgerblue;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    padding: 10px 18px;
+    font-size: 16px;
+    cursor: pointer;
+}
+.sd-button:hover {
+    background-color: #1873cc;
+}
+
+/* white card behind the dropdown and graph */
+.sd-graph-area {
+    background-color: white;
+    color: black;
+    border-radius: 4px;
+    padding: 16px;
+}
+.sd-graph-area select {
+    font-size: 14px;
+    padding: 4px;
+    margin-bottom: 10px;
+}
+
+/* each fault on its own line */
+#errors {
+    white-space: pre-line;
+}

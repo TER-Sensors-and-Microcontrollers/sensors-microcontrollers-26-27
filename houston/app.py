@@ -16,6 +16,8 @@ import atexit
 #from ER-sensors-microcontrollers.pi.globals import *
 import numpy as np
 from collections import deque
+import os 
+from flask import request
 
 # live = {}
 # live_lock = threading.Lock()
@@ -88,6 +90,31 @@ def get_since(sensor_id, last_id):
         rows = cursor.fetchall()
         cursor.close()
     return jsonify([dict(r) for r in rows])
+
+
+# /pair/<x_id>/<y_id>
+#
+# returns the latest 500 (x, y) points for a scatter plot of two sensors.
+# For each Y reading, x is the latest X reading recorded at or before it
+# (sensors from the same CAN frame line up exactly). Oldest first.
+@app.route('/pair/<int:x_id>/<int:y_id>')
+def get_pairs(x_id, y_id):
+    db = get_db()
+    cursor = db.cursor()
+    cursor.execute(
+        "SELECT "
+        "  (SELECT x.data FROM sensor_readings x "
+        "   WHERE x.sensor_id = ? AND x.reading_id <= y.reading_id "
+        "   ORDER BY x.reading_id DESC LIMIT 1) AS x, "
+        "  y.data AS y "
+        "FROM sensor_readings y "
+        "WHERE y.sensor_id = ? "
+        "ORDER BY y.reading_id DESC LIMIT 500",
+        (x_id, y_id))
+    rows = cursor.fetchall()
+    cursor.close()
+    points = [{"x": r["x"], "y": r["y"]} for r in reversed(rows) if r["x"] is not None]
+    return jsonify(points)
 
 # /readings
 # Grab entire db of sensor readings
@@ -210,11 +237,14 @@ def get_faults():
     # Post faults low bits (2 Bytes)
     cursor.execute(
         "SELECT * FROM sensor_readings "
-        "WHERE sensor_id = 1710"
+        "WHERE sensor_id = 1710 "
         "ORDER BY timestamp DESC LIMIT 1",
     )
     row = cursor.fetchall()
-    bits = row[0][3].to_bytes(2, 'little')
+    if not row:                          # no fault data yet: return what we have
+        cursor.close()
+        return jsonify(errors)
+    bits = int(row[0][3]).to_bytes(2, 'little')
     if (bits[0] >> 0 & 1):
         errors.append({"type": "post", "error": "HW de-saturation fault"})
     if (bits[0] >> 1 & 1):
@@ -255,8 +285,10 @@ def get_faults():
         "ORDER BY timestamp DESC LIMIT 1"
     )
     row = cursor.fetchall()
-    bits = row[0][3].to_bytes(2, 'little')
-
+    if not row:                          # no fault data yet: return what we have
+        cursor.close()
+        return jsonify(errors)
+    bits = int(row[0][3]).to_bytes(2, 'little')
     if (bits[0] >> 0 & 1):
         errors.append({"type": "post", "error": "2.5V Sense Voltage Low"})
     if (bits[0] >> 1 & 1):
@@ -293,7 +325,10 @@ def get_faults():
         "ORDER BY timestamp DESC LIMIT 1"
     )
     row = cursor.fetchall()
-    bits = row[0][3].to_bytes(2, 'little')
+    if not row:                          # no fault data yet: return what we have
+        cursor.close()
+        return jsonify(errors)
+    bits = int(row[0][3]).to_bytes(2, 'little')
 
     if (bits[0] >> 0 & 1):
         errors.append({"type": "run", "error": "Motor Over-speed Fault"})
@@ -331,7 +366,10 @@ def get_faults():
         "ORDER BY timestamp DESC LIMIT 1"
     )
     row = cursor.fetchall()
-    bits = row[0][3].to_bytes(2, 'little')
+    if not row:                          # no fault data yet: return what we have
+        cursor.close()
+        return jsonify(errors)
+    bits = int(row[0][3]).to_bytes(2, 'little')
 
     if (bits[0] >> 0 & 1):
         errors.append({"type": "run", "error": "Brake Input Shorted Fault"})
@@ -366,6 +404,81 @@ def get_faults():
     
     cursor.close()
     return jsonify(errors)
+
+""" 
+SD CARD UPLOAD
+"""
+
+# where uploaded SD card databases are stored (a folder next to app.py)
+UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
+UPLOADED_DB = os.path.join(UPLOAD_FOLDER, 'sd_upload.db')
+
+# /upload
+#
+# receives a .db file from the SD page, checks that it's a Houston database
+# (has a sensor_readings table), and saves it as uploads/sd_upload.db.
+# returns JSON with how many readings it holds, or an error.
+@app.route('/upload', methods = ['POST'])
+def upload_db():
+    if 'file' not in request.files:
+        return jsonify({"error": "No file was sent"}), 400
+    file = request.files['file']
+    if not file.filename.endswith('.db'):
+        return jsonify({"error": "Not a .db file"}), 400
+    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+    temp_path = UPLOADED_DB + '.tmp'
+    file.save(temp_path)
+    try:
+        conn = sqlite3.connect(temp_path)
+        count = conn.execute("SELECT COUNT(*) FROM sensor_readings").fetchone()[0]
+        conn.close()
+    except sqlite3.DatabaseError:
+        os.remove(temp_path)
+        return jsonify({"error": "This file isn't a Houston database (no sensor_readings table)"}), 400
+    os.replace(temp_path, UPLOADED_DB)
+    return jsonify({"message": "Upload successful", "readings": count})
+
+
+# get_sd_db
+#
+# opens the uploaded SD card database, or returns None if nothing has been
+# uploaded yet. Kept separate from get_db() so the live database is never touched.
+def get_sd_db():
+    if not os.path.exists(UPLOADED_DB):
+        return None
+    conn = sqlite3.connect(UPLOADED_DB)
+    conn.row_factory = sqlite3.Row      # rows can be turned into dictionaries
+    return conn
+
+# /sd/sensors
+#
+# returns every unique sensor (id, name, unit) in the uploaded file, ordered by id.
+# Same idea as /unique_sensors, but reads the uploaded file instead of the live database.
+@app.route('/sd/sensors')
+def get_sd_sensors():
+    conn = get_sd_db()
+    if conn is None:
+        return jsonify({"error": "No SD file uploaded yet"}), 404
+    rows = conn.execute(
+        "SELECT DISTINCT sensor_id, name, unit FROM sensor_readings ORDER BY sensor_id"
+    ).fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
+
+# /sd/data/<sensor_id>
+#
+# returns every reading for one sensor in the uploaded file, oldest first.
+@app.route('/sd/data/<int:sensor_id>')
+def get_sd_data(sensor_id):
+    conn = get_sd_db()
+    if conn is None:
+        return jsonify({"error": "No SD file uploaded yet"}), 404
+    rows = conn.execute(
+        "SELECT * FROM sensor_readings WHERE sensor_id = ? ORDER BY reading_id",
+        (sensor_id,)
+    ).fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
 
 """
 DATABASE INITIALIZATION

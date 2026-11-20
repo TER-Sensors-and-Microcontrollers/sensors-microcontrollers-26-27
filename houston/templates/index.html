@@ -81,9 +81,9 @@
                     <select name = "links" id = "scatterX"><option value="" disabled selected>Select new sensor for X-axis</option></select>
                     <select name = "links" id = "scatterY"><option value="" disabled selected>Select new sensor for Y-axis</option></select>
                 </div>
-                <div>
-                    <td>Errors</td>
-                    <td id = "errors"></td>
+                <div class = "errors-box">
+                    <b>Errors</b>
+                    <div id = "errors"></div>
                 </div>
             </div>
         </div>
@@ -91,8 +91,7 @@
         <script src="{{ url_for('static', filename='graphs.js') }}"></script>
         <script src="{{ url_for('static', filename='buttons.js') }}"></script>
         <script src="{{ url_for('static', filename='graph-dropdowns.js') }}"></script>
-        </div>
-
-        
+        <script src="{{ url_for('static', filename='errors.js') }}"></script>
+        </div> 
     </body>
 </html>

@@ -70,7 +70,7 @@ async function updateGraph(sid, g)
         if (rows.length === 0) return;      // nothing new: draw nothing, no repeated point
 
         for (const r of rows) {
-            g.data.labels.push(r.timestamp - (start / 1000));
+            g.data.labels.push((r.timestamp - (start / 1000)).toFixed(2));
             g.data.datasets[0].data.push(r.data);
         }
         lastId[g.canvas.id] = rows[rows.length - 1].reading_id;
@@ -150,66 +150,65 @@ function loadFromSessionStorage(name) {
     };
 }
 
-// define chart(s) here
+const LINE_STYLE = {
+    borderColor: "rgba(0,0,255,0.6)",
+    backgroundColor: "rgba(0,0,0,0)",
+    borderWidth: 1
+};
+
+function liveGraphOptions(title) {
+    return {
+    title: { display: true, text: title },
+        legend: { display: false },
+        animation: { duration: 0 },
+        elements: { point: { radius: 0 } },
+        scales: {
+            xAxes: [{ scaleLabel: { display: true, labelString: "Seconds since dashboard opened" } }]
+        }
+    };
+}
+
+function styledData(name) {
+    const data = loadFromSessionStorage(name);
+    Object.assign(data.datasets[0], LINE_STYLE);
+    return data
+}
+
 const g1 = new Chart("graph1", {
     type: "line",
-    data: loadFromSessionStorage("graph1"),
-    options: {
-        title: {
-            display: true,
-            text: 'Sensor 1 Over Time'
-        }
-    }
-});
+    data: styledData("graph1"),
+    options: liveGraphOptions('Sensor 1 Over Time')
+})
 
 const g2 = new Chart("graph2", {
     type: "line",
-    data: loadFromSessionStorage("graph2"),
-    options: {
-        title: {
-            display: true,
-            text: 'Sensor 2 Over Time'
-        }
-    }
-});
-const g3 = new Chart("graph3", {                
-    type: "line",
-    data: loadFromSessionStorage("graph3"),
-    options: {
-        title: {
-            display: true,
-            text: 'Sensor 3 Over Time'
-        }
-    }
-});
+    data: styledData("graph2"),
+    options: liveGraphOptions('Sensor 2 Over Time')
+})
 
+const g3 = new Chart("graph3", {
+    type: "line",
+    data: styledData("graph3"),
+    options: liveGraphOptions('Sensor 3 Over Time')
+})
+
+// scatter plot: each point is one (X, Y) pair from /pair/<x>/<y>
 const scatter = new Chart("scatter", {
     type: "scatter",
     data: {
         datasets: [{
-            label: "Sensor 1 vs Sensor 2",
             data: [],
-            backgroundColor: "rgba(255,0,0,0.7)"
+            backgroundColor: "rgba(0,0,255,0.4)",
+            pointRadius: 2
         }]
     },
     options: {
-        title: {
-            display: true,
-            text: 'Sensor 1 vs Sensor 2'
-        },
+        title: {display: true, text: "Pick sensors for the X and Y axes"},
+        legend: {display: false},
+        animation: {duration: 0},
         scales: {
-            xAxes: {
-                title: {
-                    display: true,
-                    text: "Sensor 1"
-                }
-            },
-            yAxes: {
-                title: {
-                    display: true,
-                    text: "Sensor 2"
-                }
-            }
+            xAxes: [{scaleLabel: {display: true, labelString: "X"}}],
+            yAxes: [{scaleLabel: {display: true, labelString: "Y"}}]
         }
     }
 });
@@ -244,37 +243,48 @@ const scatter = new Chart("scatter", {
                 });
  });
 
-document.addEventListener('DOMContentLoaded', function() {
-    var dropdown = document.getElementById('scatterX');
-                dropdown.addEventListener('change', function() 
-                {
-                    clearGraph(scatter);
-                    selectedValue = dropdown.value;
-                    if (selectedValue == 3)
-                        currentX = "pressure";
-                    else if (selectedValue == 2)
-                        currentX = "battery";
-                    else
-                        currentX = "motor temp";
-                    get_new_data(selectedValue, scatter);
-                });
- });
+// sensors picked for the scatter plot (null until picked)
+let scatterXId = null;
+let scatterYId = null;
 
- document.addEventListener('DOMContentLoaded', function() {
-    var dropdown = document.getElementById('scatterY');
-                dropdown.addEventListener('change', function() 
-                {
-                    clearGraph(scatter);
-                    selectedValue = dropdown.value;
-                    if (selectedValue == 3)
-                        currentY = "pressure";
-                    else if (selectedValue == 2)
-                        currentY = "battery";
-                    else
-                        currentY = "motor temp";
-                    get_new_data(selectedValue, scatter);
-                });
- });
+document.addEventListener('DOMContentLoaded', function() {
+    document.getElementById("scatterX").addEventListener('change', function() {
+        scatterXId = this.value;
+        updateScatter();
+    });
+    document.getElementById("scatterY").addEventListener('change', function () {
+        scatterYId = this.value;
+        updateScatter();
+    });
+});
+
+function selectedName(dropdownId) {
+    const d = document.getElementById(dropdownId);
+    return d.options[d.selectedIndex].text;
+}
+
+async function updateScatter() {
+    if (!scatterXId || !scatterYId) return;
+    if (document.getElementById('sc').classList.contains('hidden')) return;
+    try {
+        const response = await fetch('/pair/' + scatterXId + '/' + scatterYId);
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const points = await response.json();
+        const xName = selectedName('scatterX');
+        const yName = selectedName('scatterY');
+        scatter.data.datasets[0].data = points;
+        scatter.options.title.text = yName + " vs " + xName + " (" + points.length + " points)";
+        scatter.options.scales.xAxes[0].scaleLabel.labelString = xName;
+        scatter.options.scales.yAxes[0].scaleLabel.labelString = yName;
+        scatter.update(0);
+    }
+    catch (error) {
+        console.error("Error fetching or parsing scatter data:", error);
+    }
+}
+
 //  get all up-to-date data of selected id
  async function get_new_data(selectedValue, g)
  {
@@ -286,7 +296,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const all_data = await new_data.json();
 
     for (let r = 0; r < all_data.length; r++) {
-        g.data.labels.push((all_data[r].timestamp - (start / 1000)));
+        g.data.labels.push((all_data[r].timestamp - (start / 1000))).toFixed(2);
         g.data.datasets[0].data.push(all_data[r].data);
     }
 
@@ -324,4 +334,5 @@ setInterval(() => {
     updateGraph(selectedValue1, g1);
     updateGraph(selectedValue2, g2);
     updateGraph(selectedValue3, g3);
+    updateScatter();
 }, 500);

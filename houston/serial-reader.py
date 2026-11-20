@@ -33,9 +33,10 @@ def get_db():
 # (randomized CAN data frames + fixed set of CAN IDs) to serial port
 # does not return anything
 # BIG ENDIAN!
+# Pi speed is 125 Kilobits per second
 def feeder(ser:serial.Serial):
-    fids = [161, 162, 165, 166, 167, 172] # Changd to IDs the reader actually handles
-    weights = [1, 1, 1, 1, 1, 1] # Made weight of each ID equal
+    fids = [161, 162, 165, 166, 167, 172, 171] # Changd to IDs the reader actually handles
+    weights = [1, 1, 1, 1, 1, 1, 1] # Made weight of each ID equal
     start = time.time()
     while True:
         bytes_ = randomize_bytes()
