@@ -8,6 +8,7 @@ Run:  python3 can_to_uart.py
 Tip:  chrt -f 50 python3 can_to_uart.py   if you see RX overruns.
 """
 import binascii
+import platform
 import can
 import struct
 import time
@@ -21,11 +22,11 @@ MAC_CHANNEL = "239.0.0.1"
 LINUX_INTERFACE = "socketcan"
 LINUX_CHANNEL = "can0"
 BITRATE = 250000
-UART_DEV = "/dev/serial0"
+UART_DEV = "/dev/ttys004"
 BAUD = 115200 # 460800, mac can't handle this
 SEND_INTERVAL_S = 0.5          # 2 Hz for now
 RCVBUF_BYTES = 1 << 20
-OS = "Linux"
+OS = platform.system()   # "Linux" on the Pi, "Darwin" on macOS
 
 
 # ----------------------------------------------------------------- setup

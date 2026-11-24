@@ -25,6 +25,7 @@ Other options:
 import argparse
 import heapq
 import os
+import platform
 import random
 import struct
 import time
@@ -35,7 +36,7 @@ from can_to_uart import MAC_CHANNEL, MAC_INTERFACE, LINUX_CHANNEL, LINUX_INTERFA
 from frame import FIELDS
 
 UNKNOWN_ID = (0x7F0, False)      # not in FIELDS: should be counted as unknown
-OS = "Linux"
+OS = platform.system()   # "Linux" on the Pi, "Darwin" on macOS
 
 
 def open_bus():
